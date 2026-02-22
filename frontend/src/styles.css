@@ -1,0 +1,83 @@
+:root{
+  --bg: #0f1724; /* deep navy */
+  --card: #0b1220;
+  --muted: #9aa4b2;
+  --accent: #6ee7b7; /* soft green */
+  --accent-2: #60a5fa; /* soft blue */
+  --glass: rgba(255,255,255,0.04);
+  --glass-2: rgba(255,255,255,0.02);
+  --radius: 10px;
+  --mono: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
+
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{
+  margin:0;
+  font-family:var(--mono);
+  background: linear-gradient(180deg,#071025 0%, #08132a 60%);
+  color:#e6eef6;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  padding:18px;
+}
+
+.app-container{max-width:1200px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-radius:var(--radius);background:linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+header h2{margin:0;font-weight:600;letter-spacing:0.2px}
+header .user{display:flex;align-items:center;gap:12px;color:var(--muted)}
+header button{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:6px 10px;border-radius:8px;cursor:pointer}
+
+nav{display:flex;gap:8px;margin-top:14px;margin-bottom:18px}
+nav button{background:var(--glass);border:1px solid rgba(255,255,255,0.03);color:var(--muted);padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600}
+nav button:hover{background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));color:#fff}
+
+.status{margin-left:12px;color:var(--muted)}
+
+main{margin-top:12px}
+.card{background:linear-gradient(180deg,var(--card), rgba(255,255,255,0.01));padding:16px;border-radius:12px;box-shadow: 0 6px 20px rgba(2,6,23,0.6);border:1px solid rgba(255,255,255,0.02)}
+
+input,select,textarea{background:var(--glass);border:1px solid rgba(255,255,255,0.04);color:inherit;padding:8px 10px;border-radius:8px;outline:none}
+input::placeholder, textarea::placeholder{color:var(--muted)}
+
+button.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#052426;border:none;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:700}
+button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:6px 10px;border-radius:8px}
+
+.table-wrap{overflow:auto;border-radius:8px;background:var(--glass-2);padding:8px}
+table{width:100%;border-collapse:collapse;color:#d7e7f7}
+th,td{padding:10px 8px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.03)}
+th{font-size:13px;color:var(--muted);font-weight:700}
+tr:hover td{background:linear-gradient(90deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01))}
+
+.kv{display:flex;flex-direction:column;gap:6px}
+.form-row{display:flex;gap:8px;flex-wrap:wrap}
+.form-row input, .form-row select{min-width:180px}
+
+.small{font-size:13px;color:var(--muted)}
+
+.header-badge{background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:8px;color:var(--muted);font-weight:600}
+
+@media (max-width:900px){
+  header{flex-direction:column;align-items:flex-start;gap:10px}
+  .form-row input{min-width:120px}
+}
+
+/* subtle accent on important numbers */
+.stat-number{color:var(--accent);font-weight:800}
+
+/* nice scrollbars for desktop */
+::-webkit-scrollbar{height:8px;width:8px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:8px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* small utilities */
+.mt8{margin-top:8px}
+.mb8{margin-bottom:8px}
+.p8{padding:8px}
+.center{display:flex;align-items:center;justify-content:center}
+
+/* make tables easier to scan with zebra */
+tbody tr:nth-child(odd) td{background:rgba(255,255,255,0.01)}
+
+/* responsive wrap for collections rows */
+.collection-cell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;display:inline-block}

@@ -26,6 +26,8 @@ from typing import List, Optional
 from pydantic import BaseModel, ValidationError
 from decimal import Decimal
 from datetime import datetime
+import numpy as np
+import math
 
 app = FastAPI(title="KSC Migration API")
 
@@ -95,6 +97,49 @@ def _read_upload_file(file: UploadFile):
         return df
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse upload: {e}")
+
+
+def _serializable_value(v):
+    """Convert pandas/numpy/decimal/datetime values to JSON-serializable Python types."""
+    try:
+        if v is None:
+            return None
+        # normalize NaN/Inf floats
+        if isinstance(v, float):
+            if math.isnan(v) or math.isinf(v):
+                return None
+        # pandas Timestamp
+        if hasattr(v, 'to_pydatetime'):
+            try:
+                dt = v.to_pydatetime()
+                return dt.isoformat()
+            except Exception:
+                pass
+        if isinstance(v, datetime):
+            return v.isoformat()
+        if isinstance(v, Decimal):
+            try:
+                iv = int(v)
+                if iv == v:
+                    return iv
+            except Exception:
+                pass
+            return float(v)
+        if isinstance(v, np.generic):
+            try:
+                return v.item()
+            except Exception:
+                return float(v)
+        # basic python types are fine
+        if isinstance(v, (str, int, float, bool)):
+            # guard again for float NaN/Inf
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                return None
+            return v
+        # fallback to string
+        return str(v)
+    except Exception:
+        return str(v)
 
 
 def _guess_s1_column(df):
@@ -391,7 +436,9 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
 def list_collection_codes():
     try:
         df = pd.read_sql_table('collection_codes', con=engine)
-        return df.to_dict(orient='records')
+        rows = df.to_dict(orient='records')
+        out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
+        return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -741,7 +788,9 @@ def list_members(q: Optional[str] = None):
             if qnum is not None:
                 mask = mask | (df['MEMBER_ID'] == qnum)
             df = df[mask]
-        return df.to_dict(orient='records')
+        rows = df.to_dict(orient='records')
+        out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
+        return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -811,16 +860,25 @@ def update_member(member_id: int, payload: MemberIn):
 def report_members_collections(start_date: Optional[str] = None, end_date: Optional[str] = None):
     """Return members_collection rows, optionally filtered by s2 (date) range. Dates in ISO format."""
     try:
-        base = 'SELECT * FROM members_collection'
-        params = {}
+        # Read full table into pandas then filter by s2 in Python to avoid SQL param dialect issues
+        df = pd.read_sql_table('members_collection', con=engine)
         if start_date and end_date:
-            base = base + ' WHERE s2 BETWEEN :start AND :end'
-            params = {"start": start_date, "end": end_date}
-        df = pd.read_sql(base, con=engine, params=params)
-        return df.to_dict(orient='records')
+            try:
+                start_dt = pd.to_datetime(start_date)
+                end_dt = pd.to_datetime(end_date)
+                # Ensure s2 column is datetime
+                if 's2' in df.columns:
+                    df['s2'] = pd.to_datetime(df['s2'], errors='coerce')
+                    mask = (df['s2'] >= start_dt) & (df['s2'] <= end_dt)
+                    df = df[mask]
+            except Exception:
+                # if parsing fails, ignore filters and return full table
+                pass
+        rows = df.to_dict(orient='records')
+        out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
+        return out
     except Exception as e:
-        # Return error text for debugging (temporary)
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.on_event("startup")
@@ -879,6 +937,8 @@ def get_members_view():
     # Read the view and return JSON rows
     try:
         df = pd.read_sql_table('members_view', con=engine)
-        return df.to_dict(orient='records')
+        rows = df.to_dict(orient='records')
+        out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
+        return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read members_view: {e}")

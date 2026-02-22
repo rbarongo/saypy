@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import './styles.css'
 
 // Single-file frontend with Login, RBAC, and pages for Admin/Members/Collections/Reports
 export default function App(){
@@ -77,6 +78,11 @@ export default function App(){
       const res = await fetch(url, { headers: authHeaders() })
       const data = await res.json()
       setMembers(data)
+      if(data && data.length && (!membersFields || membersFields.length===0)){
+        // derive fields from first row, exclude internal timestamps
+        const keys = Object.keys(data[0]).filter(k=> k !== 'created_at' && k !== 'id')
+        setMembersFields(keys)
+      }
     }catch(e){ setStatus('Failed to load members: '+e.message) }
   }
   async function updateMember(id, payload){
@@ -87,6 +93,22 @@ export default function App(){
       await fetchMembers()
     }catch(e){ setStatus('Update failed: '+e.message) }
   }
+
+  // Members UI local state (was missing and caused runtime errors)
+  const [showMemberForm, setShowMemberForm] = useState(false)
+  const [editingMember, setEditingMember] = useState(null)
+  const [memberForm, setMemberForm] = useState({})
+  const [membersFields, setMembersFields] = useState([])
+  const [showAllMemberCols, setShowAllMemberCols] = useState(false)
+  const [showCollectionsTable, setShowCollectionsTable] = useState(false)
+  const [membersCollections, setMembersCollections] = useState([])
+  const [membersCollectionsFields, setMembersCollectionsFields] = useState([])
+  const [showCollectionsInReports, setShowCollectionsInReports] = useState(false)
+
+  // Load members when navigating to Members page
+  useEffect(()=>{
+    if(page==='members') fetchMembers('')
+  }, [page])
 
   // ----- Collections / Upload UI (reuse existing flow) -----
   // We'll keep the original upload flow components but scoped under Collections page
@@ -119,6 +141,18 @@ export default function App(){
 
   async function fetchCodes(){ try{ const res = await fetch('http://localhost:8000/collection_codes'); const data = await res.json(); setCollectionCodes(data) }catch(e){} }
   async function fetchMembersLocal(){ try{ const res = await fetch('http://localhost:8000/members'); const data = await res.json(); setMembersLocal(data) }catch(e){} }
+
+  async function fetchMembersCollections(){
+    try{
+      const res = await authFetch('http://localhost:8000/reports/members_collections')
+      const data = await res.json()
+      if(!res.ok){ setStatus('Failed to load collections: '+(data.detail||JSON.stringify(data))); setMembersCollections([]); return }
+      setMembersCollections(data)
+      if(data && data.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
+        setMembersCollectionsFields(Object.keys(data[0]).filter(k=> k !== 'added_at'))
+      }
+    }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]) }
+  }
 
   function getOrderedCodes(codes){ if(!codes||!codes.length) return []; const filtered = codes.filter(c=> c.code && String(c.code).toUpperCase() !== 'UNUSED'); const priority = ['Sno','Jina','Zaka','Sadaka']; const out=[]; const used=new Set(); priority.forEach(p=>{ const found = filtered.find(c=> String(c.code).toLowerCase()===p.toLowerCase()); if(found){ out.push(found); used.add(found.column_name) } }); const rest = filtered.filter(c=> !used.has(c.column_name)).sort((a,b)=> (a.code||'').toString().localeCompare((b.code||'').toString())); return out.concat(rest) }
 
@@ -198,7 +232,32 @@ export default function App(){
   const [reportRows, setReportRows] = useState([])
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
-  async function fetchMembersCollectionReport(){ try{ let url = 'http://localhost:8000/reports/members_collections'; if(reportFrom && reportTo) url += `?start_date=${encodeURIComponent(reportFrom)}&end_date=${encodeURIComponent(reportTo)}`; const res = await authFetch(url); const data = await res.json(); setReportRows(data) }catch(e){ setStatus('Report failed: '+e.message) } }
+  const [aggRows, setAggRows] = useState([])
+  async function fetchMembersCollectionReport(){
+    try{
+      let url = 'http://localhost:8000/reports/members_collections';
+      if(reportFrom && reportTo) url += `?start_date=${encodeURIComponent(reportFrom)}&end_date=${encodeURIComponent(reportTo)}`;
+      const res = await authFetch(url);
+      const data = await res.json();
+      if(!res.ok){ setStatus('Report failed: '+(data.detail||data.error||JSON.stringify(data))); setReportRows([]); return }
+      if(!Array.isArray(data)){ setStatus('Report returned unexpected response'); setReportRows([]); return }
+      setReportRows(data)
+    }catch(e){ setStatus('Report failed: '+e.message); setReportRows([]) }
+  }
+
+  function aggregateByCollectionCode(){
+    const rows = reportRows || [];
+    const map = {};
+    rows.forEach(r=>{
+      const code = r.collection_code || 'unknown';
+      if(!map[code]) map[code] = {collection_code: code, count:0, s5:0, s6:0, s7:0};
+      map[code].count += 1;
+      map[code].s5 += Number(r.s5||0);
+      map[code].s6 += Number(r.s6||0);
+      map[code].s7 += Number(r.s7||0);
+    })
+    setAggRows(Object.values(map));
+  }
 
   // ----- Simple helpers for role checks -----
   function isAdmin(){ return user && user.role === 'admin' }
@@ -268,23 +327,97 @@ export default function App(){
             <div style={{marginBottom:8}}>
               <input placeholder='Search members' value={membersQ} onChange={e=>setMembersQ(e.target.value)} />
               <button onClick={()=>fetchMembers(membersQ)}>Search</button>
+              <button style={{marginLeft:8}} onClick={()=>{ setEditingMember(null); setMemberForm({}); setShowMemberForm(true); }}>New Member</button>
+              <label style={{marginLeft:12}}><input type='checkbox' checked={showAllMemberCols} onChange={e=>setShowAllMemberCols(e.target.checked)} /> Show all columns</label>
             </div>
+
             <div style={{maxHeight:400, overflow:'auto'}}>
               <table style={{width:'100%', borderCollapse:'collapse'}}>
-                <thead><tr><th>#</th><th>Name</th><th>Member ID</th><th>Phone</th><th>Church</th></tr></thead>
+                <thead>
+                  <tr>
+                    {(showAllMemberCols? (membersFields || []) : ['sno','MEMBER_NAME','MEMBER_ID','PHONE','church']).map(h=> <th key={h}>{h}</th>)}
+                  </tr>
+                </thead>
                 <tbody>
                   {members.map(m=> (
-                    <tr key={m.id}><td>{m.sno}</td><td>{m.MEMBER_NAME}</td><td>{m.MEMBER_ID||''}</td><td>{m.PHONE||''}</td><td>{m.church||''}</td></tr>
+                    <tr key={m.id} onClick={()=>{ setEditingMember(m); setMemberForm({...m}); setShowMemberForm(true); }} style={{cursor:'pointer'}}>
+                      {(showAllMemberCols? (membersFields || []).map(h=> <td key={h}>{m[h]!==null&&m[h]!==undefined? String(m[h]): ''}</td>) : [m.sno, m.MEMBER_NAME, m.MEMBER_ID, m.PHONE, m.church].map((v,i)=> <td key={i}>{v||''}</td>))}
+                    </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {showMemberForm && (
+              <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
+                <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
+                    if(key==='id' || key==='created_at') return null
+                    const val = memberForm[key]===undefined? '': memberForm[key]
+                    if(key==='church'){
+                      return (
+                        <select key={key} value={val||''} onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value}))}>
+                          <option value=''>-- church --</option>
+                          {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      )
+                    }
+                    const isNumber = typeof val === 'number' || key.toLowerCase().includes('id') || key.toLowerCase().includes('sno') || key.toLowerCase().includes('pledge')
+                    return (
+                      <input key={key} placeholder={key} value={val||''} type={isNumber? 'number':'text'} onChange={e=>setMemberForm(prev=>({...prev,[key]: isNumber? (e.target.value===''? null: Number(e.target.value)) : e.target.value }))} />
+                    )
+                  })}
+                </div>
+                <div style={{marginTop:8}}>
+                  <button onClick={async ()=>{
+                    try{
+                      if(editingMember){
+                        const res = await authFetch(`http://localhost:8000/members/${editingMember.id}`,{method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(memberForm)});
+                        const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data));
+                        setStatus('Member updated');
+                      }else{
+                        const res = await authFetch('http://localhost:8000/members',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(memberForm)});
+                        const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data));
+                        setStatus('Member created');
+                      }
+                      setShowMemberForm(false);
+                      setEditingMember(null);
+                      setMemberForm({});
+                      await fetchMembers('');
+                    }catch(e){ setStatus('Save failed: '+e.message) }
+                  }}>Save</button>
+                  <button onClick={()=>{ setShowMemberForm(false); setEditingMember(null); setMemberForm({}) }} style={{marginLeft:8}}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {showCollectionsTable && (
+              <div style={{marginTop:12}}>
+                <h4>Members Collections</h4>
+                <div style={{maxHeight:300, overflow:'auto'}}>
+                  <table style={{width:'100%', borderCollapse:'collapse'}}>
+                    <thead>
+                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{c}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {membersCollections.map(r=> (
+                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> r[k]) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5]).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {page==='collections' && (
           <div>
             <h3>Collections — Upload & Manage</h3>
+            <div style={{marginBottom:8}}>
+              <button onClick={()=>{ setShowCollectionsTable(s=>!s); if(!showCollectionsTable) fetchMembersCollections() }}>{showCollectionsTable? 'Hide Collections':'Show Collections'}</button>
+            </div>
             <CollectionsUpload
               token={token}
               authFetch={authFetch}
@@ -293,6 +426,23 @@ export default function App(){
               fetchCodes={fetchCodes}
               user={user}
             />
+            {showCollectionsTable && (
+              <div style={{marginTop:12}}>
+                <h4>Members Collections</h4>
+                <div style={{maxHeight:300, overflow:'auto'}}>
+                  <table style={{width:'100%', borderCollapse:'collapse'}}>
+                    <thead>
+                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{c}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {membersCollections.map(r=> (
+                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> r[k]) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5]).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -307,6 +457,7 @@ export default function App(){
                 <label>To:</label>
                 <input type='date' value={reportTo} onChange={e=>setReportTo(e.target.value)} />
                 <button onClick={fetchMembersCollectionReport}>Run Report</button>
+                <button style={{marginLeft:8}} onClick={async ()=>{ setShowCollectionsInReports(s=>!s); if(!showCollectionsInReports) await fetchMembersCollections(); }}>{showCollectionsInReports? 'Hide Collections':'View Collections'}</button>
               </div>
               <div style={{maxHeight:400, overflow:'auto', marginTop:8}}>
                 <table style={{width:'100%', borderCollapse:'collapse'}}>
@@ -322,7 +473,36 @@ export default function App(){
                   </tbody>
                 </table>
               </div>
+              <div style={{marginTop:8}}>
+                <button onClick={aggregateByCollectionCode}>Aggregate by Collection Code</button>
+                {aggRows && aggRows.length>0 && (
+                  <div style={{marginTop:8}}>
+                    <h4>Aggregated by Collection Code</h4>
+                    <table style={{width:'100%',borderCollapse:'collapse'}}>
+                      <thead><tr><th>Collection</th><th>Count</th><th>Total s5</th><th>Total s6</th><th>Total s7</th></tr></thead>
+                      <tbody>{aggRows.map(a=> <tr key={a.collection_code}><td>{a.collection_code}</td><td>{a.count}</td><td>{a.s5}</td><td>{a.s6}</td><td>{a.s7}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
+              {showCollectionsInReports && (
+                <div style={{marginTop:12}}>
+                  <h4>Members Collections (Reports)</h4>
+                  <div style={{maxHeight:300, overflow:'auto'}}>
+                    <table style={{width:'100%', borderCollapse:'collapse'}}>
+                      <thead>
+                        <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{c}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {membersCollections.map(r=> (
+                          <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> r[k]) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5]).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
           </div>
         )}
       </main>
