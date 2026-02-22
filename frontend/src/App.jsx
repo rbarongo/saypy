@@ -104,11 +104,46 @@ export default function App(){
   const [membersCollections, setMembersCollections] = useState([])
   const [membersCollectionsFields, setMembersCollectionsFields] = useState([])
   const [showCollectionsInReports, setShowCollectionsInReports] = useState(false)
+  const [mcFilterText, setMcFilterText] = useState('')
+  const [mcFilterCode, setMcFilterCode] = useState('')
+  const [mcFrom, setMcFrom] = useState('')
+  const [mcTo, setMcTo] = useState('')
+  const [mcSortKey, setMcSortKey] = useState('id')
+  const [mcSortDir, setMcSortDir] = useState('desc')
+  const [mcPage, setMcPage] = useState(1)
+  const [mcPageSize, setMcPageSize] = useState(50)
+  const [editingCollection, setEditingCollection] = useState(null)
 
   // Load members when navigating to Members page
   useEffect(()=>{
     if(page==='members') fetchMembers('')
   }, [page])
+
+  // Load members_collections when navigating to the Members Collections page
+  useEffect(()=>{
+    if(page==='members_collections'){
+      setStatus('Loading collections...')
+      fetchMembersCollections().then(()=>{
+        setStatus('')
+        if(!membersCollections || membersCollections.length===0) setStatus('No collection rows found')
+      }).catch(()=>{})
+    }
+  }, [page])
+
+  // Global error handlers to avoid uncaught errors causing dev overlay crashes
+  useEffect(()=>{
+    const onErr = (e)=>{
+      console.error('Global error', e);
+      try{ setStatus('Error: '+ (e && e.message ? e.message : String(e)) ) }catch(_){ }
+    }
+    const onRej = (e)=>{
+      console.error('Unhandled rejection', e);
+      try{ setStatus('Unhandled rejection: '+ (e && e.reason ? (e.reason.message||String(e.reason)) : String(e)) ) }catch(_){ }
+    }
+    window.addEventListener('error', onErr)
+    window.addEventListener('unhandledrejection', onRej)
+    return ()=>{ window.removeEventListener('error', onErr); window.removeEventListener('unhandledrejection', onRej) }
+  }, [])
 
   // ----- Collections / Upload UI (reuse existing flow) -----
   // We'll keep the original upload flow components but scoped under Collections page
@@ -132,6 +167,28 @@ export default function App(){
 
   useEffect(()=>{ fetchCodes(); fetchMembersLocal() }, [])
   useEffect(()=>{ if(step===3||step===2) recomputeMappedPreview() }, [step, mapping, fullPreview, selectedChurch, selectedDate, uploaderName])
+
+  // Helper: human-friendly label for a column using `collectionCodes` mapping
+  function labelForColumn(col){
+    if(!col) return '';
+    const found = (collectionCodes||[]).find(c=> c.column_name === col || c.code === col);
+    if(found && found.code) return found.code;
+    const human = { s1: 'Sno', s2: 'Date', s3: 'Serial', s4: 'Name' }[col];
+    return human || col;
+  }
+
+  // Helper: display value for a table cell; for `collection_code` show the column_name when available
+  function displayCellValue(k, row){
+    if(!row) return '';
+    if(k === 'collection_code'){
+      const raw = row.collection_code;
+      const found = (collectionCodes||[]).find(c=> c.column_name === raw || c.code === raw);
+      if(found) return found.column_name || found.code || raw;
+      return raw || '';
+    }
+    const v = row[k];
+    return v===null||v===undefined? '': String(v);
+  }
 
   function authFetch(url, opts={}){
     const h = opts.headers? {...opts.headers} : {}
@@ -293,6 +350,7 @@ export default function App(){
       <nav style={{marginTop:12, marginBottom:12}}>
         <button onClick={()=>setPage('collections')}>Collections</button>
         <button onClick={()=>setPage('members')}>Members</button>
+        <button onClick={()=>setPage('members_collections')}>Members Collections</button>
         <button onClick={()=>setPage('reports')}>Reports</button>
         {isAdmin() && <button onClick={()=>{ setPage('admin'); fetchUsers() }}>Admin</button>}
         <span style={{marginLeft:12,color:'#666'}}>{status}</span>
@@ -402,7 +460,7 @@ export default function App(){
                     </thead>
                     <tbody>
                       {membersCollections.map(r=> (
-                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> r[k]) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5]).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
+                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> displayCellValue(k, r)) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5].map(v=> v)).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -436,10 +494,130 @@ export default function App(){
                     </thead>
                     <tbody>
                       {membersCollections.map(r=> (
-                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> r[k]) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5]).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
+                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> displayCellValue(k, r)) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5].map(v=> v)).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {page==='members_collections' && (
+          <div>
+            <h3>Members Collections</h3>
+            <div style={{marginBottom:8, display:'flex', gap:8, alignItems:'center'}}>
+              <button onClick={fetchMembersCollections}>Refresh</button>
+              <input placeholder='Search' value={mcFilterText} onChange={e=>{ setMcFilterText(e.target.value); setMcPage(1) }} />
+              <select value={mcFilterCode} onChange={e=>{ setMcFilterCode(e.target.value); setMcPage(1) }}>
+                <option value=''>-- all codes --</option>
+                {(collectionCodes||[]).map(c=> <option key={c.column_name} value={c.column_name}>{c.code || c.column_name}</option>)}
+              </select>
+              <label>From</label>
+              <input type='date' value={mcFrom} onChange={e=>{ setMcFrom(e.target.value); setMcPage(1) }} />
+              <label>To</label>
+              <input type='date' value={mcTo} onChange={e=>{ setMcTo(e.target.value); setMcPage(1) }} />
+              <label>Page size</label>
+              <select value={mcPageSize} onChange={e=>{ setMcPageSize(Number(e.target.value)); setMcPage(1) }}>
+                {[20,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+
+            <div className='table-wrap' style={{maxHeight:500}}>
+              <table>
+                <thead>
+                  <tr>
+                    {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> (
+                      <th key={c} style={{cursor:'pointer'}} onClick={()=>{
+                        if(mcSortKey===c) setMcSortDir(d=> d==='asc'? 'desc':'asc'); else { setMcSortKey(c); setMcSortDir('asc') }
+                      }}>{c} {mcSortKey===c? (mcSortDir==='asc'? '▲':'▼') : ''}</th>
+                    ))}
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    try{
+                      // apply client-side filters/sort/paging
+                      let rows = Array.isArray(membersCollections) ? membersCollections : [];
+                      if(mcFilterCode) rows = rows.filter(r=> {
+                        try{ return r.collection_code === mcFilterCode || r.collection_code === (collectionCodes.find(c=>c.column_name===mcFilterCode)?.code) }
+                        catch(e){ return false }
+                      })
+                      if(mcFilterText) rows = rows.filter(r => {
+                        try{ return Object.values(r).join(' ').toLowerCase().includes(mcFilterText.toLowerCase()) }catch(e){ return false }
+                      })
+                      if(mcFrom){ const dfrom = new Date(mcFrom); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) >= dfrom }catch(e){return false} }) }
+                      if(mcTo){ const dto = new Date(mcTo); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) <= dto }catch(e){return false} }) }
+                      // sort
+                      rows = rows.slice().sort((a,b)=>{
+                        const va = a && a[mcSortKey]; const vb = b && b[mcSortKey];
+                        if(va==null && vb==null) return 0; if(va==null) return mcSortDir==='asc'? -1:1; if(vb==null) return mcSortDir==='asc'? 1:-1;
+                        if(typeof va === 'number' && typeof vb === 'number') return mcSortDir==='asc'? va-vb : vb-va;
+                        return mcSortDir==='asc'? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+                      })
+                      const total = rows.length
+                      const start = (mcPage-1)*mcPageSize; const end = start + mcPageSize
+                      const pageRows = rows.slice(start, end)
+                      return pageRows.map((r,idx)=> (
+                        <tr key={r && (r.id||idx)}>
+                          {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(k=> <td key={k}>{displayCellValue(k, r)}</td>)}
+                          <td>
+                            <button onClick={()=>{ setEditingCollection({...r}); }}>Edit</button>
+                          </td>
+                        </tr>
+                      ))
+                    }catch(err){
+                      console.error('Render error in members_collections table', err)
+                      return <tr><td colSpan={ (membersCollectionsFields.length? membersCollectionsFields.length:10) + 1 }>Error rendering collections: {String(err.message||err)}</td></tr>
+                    }
+                  })()}
+                </tbody>
+              </table>
+            </div>
+            <div style={{marginTop:8}}>
+              <button onClick={()=> setMcPage(p=> Math.max(1,p-1))}>Prev</button>
+              <span style={{margin:'0 8px'}}>Page {mcPage}</span>
+              <button onClick={()=> setMcPage(p=> p+1)}>Next</button>
+            </div>
+
+            {/* Edit modal */}
+            {editingCollection && (
+              <div className='card' style={{marginTop:12}}>
+                <h4>Edit Collection #{editingCollection.id}</h4>
+                <div className='form-row'>
+                  { (membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['collection_code','member_id','church','s1','s2','s3','s4','s5']).map(k=>{
+                    if(k==='id' || k==='added_at') return null
+                    const val = editingCollection[k]===null||editingCollection[k]===undefined? '': editingCollection[k]
+                    if(k==='s2'){
+                      const v = val? new Date(val).toISOString().slice(0,10) : ''
+                      return <input key={k} type='date' value={v} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))} />
+                    }
+                    if(k==='church'){
+                      return (
+                        <select key={k} value={val||''} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))}>
+                          <option value=''>-- church --</option>
+                          {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      )
+                    }
+                    return <input key={k} placeholder={k} value={val||''} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))} />
+                  })}
+                </div>
+                <div style={{marginTop:8}}>
+                  <button onClick={async ()=>{
+                    try{
+                      const id = editingCollection.id
+                      const payload = {...editingCollection}; delete payload.id
+                      const res = await authFetch(`http://localhost:8000/members_collection/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+                      const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
+                      setStatus('Saved')
+                      setEditingCollection(null)
+                      await fetchMembersCollections()
+                    }catch(e){ setStatus('Save failed: '+e.message) }
+                  }}>Save</button>
+                  <button style={{marginLeft:8}} onClick={()=> setEditingCollection(null)}>Cancel</button>
                 </div>
               </div>
             )}
@@ -467,9 +645,16 @@ export default function App(){
                     </tr>
                   </thead>
                   <tbody>
-                    {reportRows.map((r,idx)=> (
-                      <tr key={idx}>{Object.keys(r).map(k=> <td key={k} style={{padding:6}}>{String(r[k]||'')}</td>)}</tr>
-                    ))}
+                    {(() => {
+                      try{
+                        return (Array.isArray(reportRows)? reportRows : []).map((r,idx)=> (
+                          <tr key={idx}>{Object.keys(r||{}).map(k=> <td key={k} style={{padding:6}}>{String((r&&r[k])||'')}</td>)}</tr>
+                        ))
+                      }catch(e){
+                        console.error('Render error in reports table', e)
+                        return <tr><td>Error rendering report: {String(e.message||e)}</td></tr>
+                      }
+                    })()}
                   </tbody>
                 </table>
               </div>
@@ -495,9 +680,15 @@ export default function App(){
                         <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{c}</th>)}</tr>
                       </thead>
                       <tbody>
-                        {membersCollections.map(r=> (
-                          <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> r[k]) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5]).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
-                        ))}
+                        {(() => {
+                          try{
+                            const rows = Array.isArray(membersCollections)? membersCollections : [];
+                            if(rows.length === 0) return <tr><td colSpan={(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).length:9)}>No collection rows</td></tr>
+                            return rows.map(r=> (
+                              <tr key={r && r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> displayCellValue(k, r)) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5].map(v=> v)).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
+                            ))
+                          }catch(e){ console.error('Error rendering report collections', e); return <tr><td>Error rendering collections: {String(e.message||e)}</td></tr> }
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -672,16 +863,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
     return out;
   }
 
-  function labelForColumn(col){
-    if(!col) return '';
-    const found = (collectionCodes||[]).find(c=> c.column_name === col || c.code === col);
-    if(found && found.code) return found.code;
-    // fallback: humanize common names
-    const human = {
-      s1: 'Sno', s2: 'Date', s3: 'Serial', s4: 'Name'
-    }[col];
-    return human || col;
-  }
+  
 
   async function validateRows(rows){ try{ const headers = {'Content-Type':'application/json'}; const res = await authFetch('http://localhost:8000/members_collections/validate',{method:'POST', headers, body: JSON.stringify(rows)}); const data = await res.json(); if(!res.ok){ if(res.status===422 && data && data.detail && data.detail.validation_errors){ if(data.detail.rows) setMappedPreview(data.detail.rows); return data.detail.validation_errors || [] } throw new Error(data.detail||JSON.stringify(data)) } if(data.rows) setMappedPreview(data.rows); return data.validation_errors || [] }catch(err){ return [{error: err.message}] } }
 

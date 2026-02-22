@@ -322,6 +322,32 @@ def create_members_collection(payload: MemberCollectionIn):
     pk = insert_members_collection(collection_code=payload.collection_code, member_id=payload.member_id)
     return {"id": pk}
 
+@app.put('/members_collection/{row_id}')
+def update_members_collection(row_id: int, payload: dict):
+    """Update a members_collection row by id. Accepts any subset of columns present in the table."""
+    try:
+        # limit updates to known columns to avoid SQL injection
+        cols = get_target_columns('members_collection')
+        if not cols:
+            raise HTTPException(status_code=500, detail='members_collection table not found')
+        update_cols = {k: v for k, v in payload.items() if k in cols and k != 'id'}
+        if not update_cols:
+            raise HTTPException(status_code=400, detail='No updatable columns provided')
+        set_parts = ', '.join([f"{c}=:{c}" for c in update_cols.keys()])
+        params = dict(update_cols)
+        params['id'] = row_id
+        with engine.connect() as conn:
+            conn.execute(text(f"UPDATE members_collection SET {set_parts} WHERE id=:id"), params)
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post('/members_collections/bulk')
 def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(require_api_key_or_user), request: Request = None):
@@ -862,18 +888,25 @@ def report_members_collections(start_date: Optional[str] = None, end_date: Optio
     try:
         # Read full table into pandas then filter by s2 in Python to avoid SQL param dialect issues
         df = pd.read_sql_table('members_collection', con=engine)
-        if start_date and end_date:
-            try:
-                start_dt = pd.to_datetime(start_date)
-                end_dt = pd.to_datetime(end_date)
-                # Ensure s2 column is datetime
-                if 's2' in df.columns:
-                    df['s2'] = pd.to_datetime(df['s2'], errors='coerce')
-                    mask = (df['s2'] >= start_dt) & (df['s2'] <= end_dt)
-                    df = df[mask]
-            except Exception:
-                # if parsing fails, ignore filters and return full table
-                pass
+        # Parse provided dates defensively. Accept either full ISO datetimes or simple YYYY-MM-DD.
+        try:
+            start_dt = pd.to_datetime(start_date, errors='coerce') if start_date else None
+            end_dt = pd.to_datetime(end_date, errors='coerce') if end_date else None
+            # If user provided a date-only string like YYYY-MM-DD, extend end_dt to end of that day
+            if end_date and end_dt is not pd.NaT and len(str(end_date)) == 10:
+                end_dt = end_dt + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+            # Apply filter if s2 column exists and at least one bound is provided
+            if 's2' in df.columns and (start_dt is not None or end_dt is not None):
+                df['s2'] = pd.to_datetime(df['s2'], errors='coerce')
+                mask = pd.Series([True] * len(df))
+                if start_dt is not None and start_dt is not pd.NaT:
+                    mask = mask & (df['s2'] >= start_dt)
+                if end_dt is not None and end_dt is not pd.NaT:
+                    mask = mask & (df['s2'] <= end_dt)
+                df = df[mask.fillna(False)]
+        except Exception as e:
+            # Return a helpful error for invalid date input rather than failing silently
+            raise HTTPException(status_code=400, detail=f"Invalid date filter: {e}")
         rows = df.to_dict(orient='records')
         out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
         return out
