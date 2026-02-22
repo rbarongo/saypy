@@ -1,0 +1,11 @@
+./envs
+config.py
+tssannual2023/config.py
+tssannual2024/config.py
+tssannual2023
+tssannual2024
+tssannual2025/scripts/.env
+.tssenv/
+tssannual2023/documents
+tssannual2024/documents
+tssannual2025/documents
