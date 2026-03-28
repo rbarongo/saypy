@@ -186,6 +186,9 @@ export default function App(){
       if(found) return found.column_name || found.code || raw;
       return raw || '';
     }
+    if(k === 'verified'){
+      return row && row.__verified? 'Yes':'No';
+    }
     const v = row[k];
     return v===null||v===undefined? '': String(v);
   }
@@ -204,11 +207,44 @@ export default function App(){
       const res = await authFetch('http://localhost:8000/reports/members_collections')
       const data = await res.json()
       if(!res.ok){ setStatus('Failed to load collections: '+(data.detail||JSON.stringify(data))); setMembersCollections([]); return }
-      setMembersCollections(data)
-      if(data && data.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
-        setMembersCollectionsFields(Object.keys(data[0]).filter(k=> k !== 'added_at'))
+      // attach helper metadata per row (verified flag and suggestions)
+      const enriched = (Array.isArray(data)? data : []).map(r=> ({...r, __verified: false, __suggestions: []}))
+      setMembersCollections(enriched)
+      if(enriched && enriched.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
+        const keys = Object.keys(enriched[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
+        if(!keys.includes('verified')) keys.push('verified')
+        setMembersCollectionsFields(keys)
       }
     }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]) }
+  }
+
+  // Simple Levenshtein distance for fuzzy matching
+  function levenshtein(a, b){
+    if(!a) a=''; if(!b) b=''; a = String(a).toLowerCase(); b = String(b).toLowerCase();
+    const m = a.length, n = b.length; const dp = Array.from({length: m+1}, ()=> Array(n+1).fill(0));
+    for(let i=0;i<=m;i++) dp[i][0]=i; for(let j=0;j<=n;j++) dp[0][j]=j;
+    for(let i=1;i<=m;i++) for(let j=1;j<=n;j++) dp[i][j] = a[i-1]===b[j-1]? dp[i-1][j-1] : Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+1);
+    return dp[m][n];
+  }
+
+  // Verify names in current membersCollections: fetch /members?q=name and compute fuzzy suggestions
+  async function verifyNames(){
+    if(!Array.isArray(membersCollections) || membersCollections.length===0) return;
+    setStatus('Verifying names...')
+    const updated = [];
+    for(const r of membersCollections){
+      const name = r.s4 || r.s4 || r['s4'] || '';
+      if(!name){ updated.push({...r, __verified:false, __suggestions: []}); continue }
+      try{
+        const res = await fetch(`http://localhost:8000/members?q=${encodeURIComponent(name)}`)
+        const cand = await res.json();
+        const scored = (Array.isArray(cand)? cand: []).map(c=> ({...c, _score: levenshtein(name, c.MEMBER_NAME || c.MEMBER_NAME || '')})).sort((a,b)=> a._score - b._score).slice(0,6)
+        const verified = scored.length>0 && scored[0]._score <= Math.max(2, Math.floor((name.length||1)*0.25));
+        updated.push({...r, __verified: verified, __suggestions: scored})
+      }catch(e){ updated.push({...r, __verified:false, __suggestions: []}) }
+    }
+    setMembersCollections(updated)
+    setStatus('Verification complete')
   }
 
   function getOrderedCodes(codes){ if(!codes||!codes.length) return []; const filtered = codes.filter(c=> c.code && String(c.code).toUpperCase() !== 'UNUSED'); const priority = ['Sno','Jina','Zaka','Sadaka']; const out=[]; const used=new Set(); priority.forEach(p=>{ const found = filtered.find(c=> String(c.code).toLowerCase()===p.toLowerCase()); if(found){ out.push(found); used.add(found.column_name) } }); const rest = filtered.filter(c=> !used.has(c.column_name)).sort((a,b)=> (a.code||'').toString().localeCompare((b.code||'').toString())); return out.concat(rest) }
@@ -456,7 +492,7 @@ export default function App(){
                 <div style={{maxHeight:300, overflow:'auto'}}>
                   <table style={{width:'100%', borderCollapse:'collapse'}}>
                     <thead>
-                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{c}</th>)}</tr>
+                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
                     </thead>
                     <tbody>
                       {membersCollections.map(r=> (
@@ -490,7 +526,7 @@ export default function App(){
                 <div style={{maxHeight:300, overflow:'auto'}}>
                   <table style={{width:'100%', borderCollapse:'collapse'}}>
                     <thead>
-                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{c}</th>)}</tr>
+                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
                     </thead>
                     <tbody>
                       {membersCollections.map(r=> (
@@ -514,6 +550,7 @@ export default function App(){
                 <option value=''>-- all codes --</option>
                 {(collectionCodes||[]).map(c=> <option key={c.column_name} value={c.column_name}>{c.code || c.column_name}</option>)}
               </select>
+              <button onClick={()=> verifyNames()}>Verify Names</button>
               <label>From</label>
               <input type='date' value={mcFrom} onChange={e=>{ setMcFrom(e.target.value); setMcPage(1) }} />
               <label>To</label>
@@ -531,7 +568,7 @@ export default function App(){
                     {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> (
                       <th key={c} style={{cursor:'pointer'}} onClick={()=>{
                         if(mcSortKey===c) setMcSortDir(d=> d==='asc'? 'desc':'asc'); else { setMcSortKey(c); setMcSortDir('asc') }
-                      }}>{c} {mcSortKey===c? (mcSortDir==='asc'? '▲':'▼') : ''}</th>
+                      }}>{labelForColumn(c)} {mcSortKey===c? (mcSortDir==='asc'? '▲':'▼') : ''}</th>
                     ))}
                     <th>Actions</th>
                   </tr>
@@ -557,12 +594,15 @@ export default function App(){
                         if(typeof va === 'number' && typeof vb === 'number') return mcSortDir==='asc'? va-vb : vb-va;
                         return mcSortDir==='asc'? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
                       })
-                      const total = rows.length
+                      const total = rows.length;
                       const start = (mcPage-1)*mcPageSize; const end = start + mcPageSize
                       const pageRows = rows.slice(start, end)
                       return pageRows.map((r,idx)=> (
                         <tr key={r && (r.id||idx)}>
-                          {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(k=> <td key={k}>{displayCellValue(k, r)}</td>)}
+                          {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(k=> {
+                            if(k === 'verified') return <td key={k}>{r && r.__verified? 'Yes':'No'}</td>
+                            return <td key={k}>{displayCellValue(k, r)}</td>
+                          })}
                           <td>
                             <button onClick={()=>{ setEditingCollection({...r}); }}>Edit</button>
                           </td>
@@ -596,10 +636,63 @@ export default function App(){
                     }
                     if(k==='church'){
                       return (
-                        <select key={k} value={val||''} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))}>
-                          <option value=''>-- church --</option>
-                          {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
+                        <div key={k} style={{display:'flex',flexDirection:'column'}}>
+                          <select value={val||''} onChange={e=>{
+                            const newChurch = e.target.value || null
+                            setEditingCollection(prev=>{
+                              const next = {...prev, [k]: newChurch}
+                              try{
+                                const s2 = next.s2 ? new Date(next.s2) : (next.s2===undefined? null : new Date(next.s2))
+                                const s3 = next.s3!=null? Number(next.s3) : null
+                                const churchId = newChurch || next.church || null
+                                if(s2 && s3!=null && churchId){
+                                  const ymd = s2.toISOString().slice(0,10).replace(/-/g,'')
+                                  const cidn = String(Number(churchId)).padStart(3,'0')
+                                  const s3n = String(Number(s3)).padStart(3,'0')
+                                  next.s1 = Number(`${ymd}${cidn}${s3n}`)
+                                }
+                              }catch(e){}
+                              return next
+                            })
+                          }}>
+                            <option value=''>-- church --</option>
+                            {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          <div style={{fontSize:12,color:'#666'}}>{editingCollection && editingCollection.__verified? 'Name verified in members':'Not verified'}</div>
+                        </div>
+                      )
+                    }
+                    if(k==='s4'){
+                      return (
+                        <div key={k} style={{display:'flex',flexDirection:'column'}}>
+                          <input placeholder={k} value={val||''} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))} />
+                          <div style={{marginTop:6}}>
+                            <button onClick={async ()=>{
+                              try{
+                                const nm = editingCollection.s4 || ''
+                                if(!nm) return setStatus('No name to search')
+                                const res = await fetch(`http://localhost:8000/members?q=${encodeURIComponent(nm)}`)
+                                const cand = await res.json()
+                                const scored = (Array.isArray(cand)? cand: []).map(c=> ({...c, _score: levenshtein(nm, c.MEMBER_NAME || '')})).sort((a,b)=> a._score - b._score).slice(0,6)
+                                setEditingCollection(prev=>({...prev, __suggestions: scored, __verified: scored.length>0 && scored[0]._score <= Math.max(2, Math.floor((nm.length||1)*0.25)) }))
+                              }catch(e){ setStatus('Suggestion lookup failed: '+e.message) }
+                            }}>Find suggestions</button>
+                          </div>
+                          {editingCollection.__suggestions && editingCollection.__suggestions.length>0 && (
+                            <div style={{marginTop:6}}>
+                              <div style={{fontSize:12,color:'#333'}}>Suggestions:</div>
+                              {editingCollection.__suggestions.map(s=> (
+                                <div key={s.id} style={{display:'flex',gap:8,alignItems:'center'}}>
+                                  <div style={{flex:1}}>{s.MEMBER_NAME} (ID: {s.MEMBER_ID || s.id})</div>
+                                  <button onClick={()=>{
+                                    // map suggestion to this collection row: set member_id and name
+                                    setEditingCollection(prev=>({...prev, member_id: s.MEMBER_ID || s.id, s4: s.MEMBER_NAME, __verified: true}))
+                                  }}>Map</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       )
                     }
                     return <input key={k} placeholder={k} value={val||''} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))} />
@@ -677,7 +770,7 @@ export default function App(){
                   <div style={{maxHeight:300, overflow:'auto'}}>
                     <table style={{width:'100%', borderCollapse:'collapse'}}>
                       <thead>
-                        <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{c}</th>)}</tr>
+                        <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
                       </thead>
                       <tbody>
                         {(() => {

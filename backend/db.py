@@ -257,10 +257,26 @@ def create_tables():
     except Exception:
         pass
 
+    try:
+        # Remove duplicate s1 values in members_collection before adding unique index
+        deduplicate_members_collection_s1()
+    except Exception:
+        pass
+
     # Ensure a unique index on `sno` to prevent future duplicates
     try:
         with engine.connect() as conn:
             conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_sno_unique ON members(sno)'))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_collection_s1_unique ON members_collection(s1)'))
             try:
                 conn.commit()
             except Exception:
@@ -647,6 +663,40 @@ def deduplicate_members_by_sno():
                 continue
             # delete others
             conn.execute(text('DELETE FROM members WHERE sno = :s AND id != :keep'), {'s': s, 'keep': keep_id})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            deleted += 1
+    return deleted
+
+
+def deduplicate_members_collection_s1():
+    """Remove duplicate rows in `members_collection` that share the same `s1`.
+    Keeps the row with the lowest `id` for each `s1` and deletes others. Only considers non-null s1 values.
+    Returns number of s1 values deduplicated.
+    """
+    ensure_db_exists()
+    inspector = inspect(engine)
+    if 'members_collection' not in inspector.get_table_names():
+        return 0
+    with engine.connect() as conn:
+        # find s1 values with duplicates
+        res = conn.execute(text("SELECT s1 FROM members_collection WHERE s1 IS NOT NULL GROUP BY s1 HAVING COUNT(*) > 1"))
+        duplicates = [r[0] for r in res.fetchall()]
+        deleted = 0
+        for s in duplicates:
+            # keep the lowest id for this s1
+            keep_res = conn.execute(text('SELECT id FROM members_collection WHERE s1 = :s ORDER BY id LIMIT 1'), {'s': s})
+            try:
+                keep_row = keep_res.fetchone()
+                keep_id = keep_row[0] if keep_row else None
+            except Exception:
+                keep_id = None
+            if keep_id is None:
+                continue
+            # delete others
+            conn.execute(text('DELETE FROM members_collection WHERE s1 = :s AND id != :keep'), {'s': s, 'keep': keep_id})
             try:
                 conn.commit()
             except Exception:
