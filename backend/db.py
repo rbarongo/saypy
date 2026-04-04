@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 # Use SQLAlchemy to support both SQLite and Postgres via a single API
 from sqlalchemy import create_engine, inspect
-from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, DateTime, func, text, Numeric
+from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, DateTime, func, text, Numeric, BigInteger
 from sqlalchemy import insert as sql_insert
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, Dict, Tuple
@@ -331,9 +331,9 @@ members_collection = Table(
     Column('collection_code', String(200), nullable=False),
     Column('member_id', Integer, ForeignKey('members.id'), nullable=True),
     Column('church', Integer, ForeignKey('church.id'), nullable=True),
-    Column('s1', Integer, nullable=True),
+    Column('s1', BigInteger, nullable=True),
     Column('s2', DateTime, nullable=True),
-    Column('s3', Numeric, nullable=True),
+    Column('s3', Integer, nullable=True),
     Column('s4', String(255), nullable=True),
     Column('s5', Numeric, nullable=True),
     Column('s6', Numeric, nullable=True),
