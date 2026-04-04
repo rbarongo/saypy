@@ -15,9 +15,12 @@ from sqlalchemy import insert as sql_insert
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional
 
-load_dotenv()
-
 BASE_DIR = os.path.dirname(__file__)
+
+# Load backend-local env first so deployments using `backend/.env` are deterministic.
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+# Also load default-discovery .env (does not override existing values).
+load_dotenv()
 
 # Config: DB_ENGINE can be 'sqlite' or 'postgres' (or 'postgresql')
 DB_ENGINE = os.getenv("DB_ENGINE", "sqlite").lower()

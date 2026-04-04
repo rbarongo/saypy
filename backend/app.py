@@ -28,8 +28,10 @@ from decimal import Decimal
 from datetime import datetime
 import numpy as np
 import math
+import logging
 
 app = FastAPI(title="KSC Migration API")
+logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -919,8 +921,8 @@ def on_startup():
     try:
         create_tables()
     except Exception:
-        # Do not crash the app on startup table creation errors; log would be better in production
-        pass
+        logger.exception("Database initialization failed during startup")
+        raise
 
     # If members table exists but is empty, attempt to initialize from Members.xlsx
     try:
