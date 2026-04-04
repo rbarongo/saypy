@@ -29,6 +29,7 @@ from datetime import datetime
 import numpy as np
 import math
 import logging
+import io
 
 app = FastAPI(title="KSC Migration API")
 logger = logging.getLogger(__name__)
@@ -85,17 +86,27 @@ app.add_middleware(
 def _read_upload_file(file: UploadFile):
     name = file.filename or "upload"
     try:
+        try:
+            file.file.seek(0)
+        except Exception:
+            pass
+
+        raw = file.file.read()
+        if raw is None:
+            raise ValueError("Upload was empty")
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8")
+
         if name.lower().endswith(('.xls', '.xlsx')):
-            df = pd.read_excel(file.file)
+            df = pd.read_excel(io.BytesIO(raw))
         elif name.lower().endswith('.csv') or file.content_type == 'text/csv':
-            df = pd.read_csv(file.file)
+            df = pd.read_csv(io.BytesIO(raw))
         else:
             # try excel first
             try:
-                df = pd.read_excel(file.file)
+                df = pd.read_excel(io.BytesIO(raw))
             except Exception:
-                file.file.seek(0)
-                df = pd.read_csv(file.file)
+                df = pd.read_csv(io.BytesIO(raw))
         return df
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse upload: {e}")
