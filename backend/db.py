@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, DateTime, func, text, Numeric
 from sqlalchemy import insert as sql_insert
 from sqlalchemy.exc import SQLAlchemyError
-from typing import Optional
+from typing import Optional, Dict, Tuple
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -121,8 +121,174 @@ def get_target_columns(table_name: str = "members_collection") -> List[str]:
 def insert_dataframe(df: pd.DataFrame, table_name: str = "members_collection") -> None:
     """Insert rows from a DataFrame into the configured database table."""
     ensure_db_exists()
+    tn = (table_name or "").lower()
+    if tn in ("members_collection", "members_collections"):
+        rows = df.to_dict(orient='records') if df is not None else []
+        rows = normalize_members_collection_rows(rows, fill_missing_s3=True, recompute_s1=True)
+        df = pd.DataFrame(rows)
     # Use pandas to_sql which works with SQLAlchemy engines for both sqlite and postgres
     df.to_sql(table_name, engine, if_exists="append", index=False)
+
+
+def _coerce_int(v) -> Optional[int]:
+    if v is None:
+        return None
+    try:
+        s = str(v).strip()
+        if s == "":
+            return None
+        return int(float(s))
+    except Exception:
+        return None
+
+
+def _parse_collection_dt(v) -> Optional[datetime]:
+    if v is None:
+        return None
+    try:
+        if isinstance(v, datetime):
+            return v
+        dt = pd.to_datetime(v, errors='coerce')
+        if pd.isna(dt):
+            return None
+        if hasattr(dt, 'to_pydatetime'):
+            return dt.to_pydatetime()
+        return dt
+    except Exception:
+        return None
+
+
+def compute_members_collection_s1(s2_value, church_value, s3_value) -> Optional[int]:
+    """Build s1 in the format YYYYMMDD + church(3) + s3(3)."""
+    s2dt = _parse_collection_dt(s2_value)
+    church_id = _coerce_int(church_value)
+    s3num = _coerce_int(s3_value)
+    if s2dt is None or church_id is None or s3num is None:
+        return None
+    ymd = s2dt.strftime('%Y%m%d')
+    return int(f"{ymd}{int(church_id):03d}{int(s3num):03d}")
+
+
+def _load_existing_serial_counters(keys: List[Tuple[str, int]]) -> Dict[Tuple[str, int], int]:
+    counters: Dict[Tuple[str, int], int] = {}
+    if not keys:
+        return counters
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(text('SELECT s2, church, s3 FROM members_collection WHERE s2 IS NOT NULL AND church IS NOT NULL'))
+            for r in res.fetchall():
+                try:
+                    dt = _parse_collection_dt(r[0])
+                    ch = _coerce_int(r[1])
+                    s3v = _coerce_int(r[2])
+                    if dt is None or ch is None or s3v is None:
+                        continue
+                    k = (dt.strftime('%Y-%m-%d'), int(ch))
+                    if k not in keys:
+                        continue
+                    counters[k] = max(counters.get(k, 0), int(s3v))
+                except Exception:
+                    continue
+    except Exception:
+        return counters
+    return counters
+
+
+def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = True, recompute_s1: bool = True) -> List[dict]:
+    """Normalize members_collection rows: ensure s3 serial and canonical s1 format."""
+    if not rows:
+        return []
+
+    keys = set()
+    for row in rows:
+        dt = _parse_collection_dt(row.get('s2') if isinstance(row, dict) else None)
+        ch = _coerce_int(row.get('church') if isinstance(row, dict) else None)
+        if dt is not None and ch is not None:
+            keys.add((dt.strftime('%Y-%m-%d'), int(ch)))
+
+    counters = _load_existing_serial_counters(list(keys))
+    out = []
+    for row in rows:
+        r = dict(row)
+
+        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
+            if r.get(sk) is not None and not isinstance(r.get(sk), str):
+                r[sk] = str(r.get(sk))
+
+        s2dt = _parse_collection_dt(r.get('s2'))
+        if s2dt is not None:
+            r['s2'] = s2dt
+        church_id = _coerce_int(r.get('church'))
+        if church_id is not None:
+            r['church'] = church_id
+
+        s3num = _coerce_int(r.get('s3'))
+        if fill_missing_s3 and s3num is None and s2dt is not None and church_id is not None:
+            k = (s2dt.strftime('%Y-%m-%d'), int(church_id))
+            nxt = counters.get(k, 0) + 1
+            counters[k] = nxt
+            s3num = nxt
+
+        if s3num is not None:
+            r['s3'] = int(s3num)
+
+        if recompute_s1:
+            s1 = compute_members_collection_s1(r.get('s2'), r.get('church'), r.get('s3'))
+            if s1 is not None:
+                r['s1'] = int(s1)
+
+        out.append(r)
+    return out
+
+
+def backfill_members_collection_identifiers() -> int:
+    """Backfill s3/s1 for existing rows to canonical format YYYYMMDD + church(3) + s3(3)."""
+    ensure_db_exists()
+    inspector = inspect(engine)
+    if 'members_collection' not in inspector.get_table_names():
+        return 0
+
+    with engine.connect() as conn:
+        rows = conn.execute(text('SELECT id, s2, church, s3, s1 FROM members_collection ORDER BY id')).fetchall()
+
+    if not rows:
+        return 0
+
+    counters: Dict[Tuple[str, int], int] = {}
+    normalized = []
+
+    for rid, s2, church, s3, s1 in rows:
+        dt = _parse_collection_dt(s2)
+        ch = _coerce_int(church)
+        s3n = _coerce_int(s3)
+        key = (dt.strftime('%Y-%m-%d'), int(ch)) if dt is not None and ch is not None else None
+        if key and s3n is not None:
+            counters[key] = max(counters.get(key, 0), s3n)
+        normalized.append({'id': rid, 'dt': dt, 'church': ch, 's3': s3n, 's1': _coerce_int(s1), 'key': key})
+
+    updated = 0
+    with engine.begin() as conn:
+        for item in normalized:
+            dt = item['dt']
+            ch = item['church']
+            key = item['key']
+            s3n = item['s3']
+            if key and s3n is None:
+                nxt = counters.get(key, 0) + 1
+                counters[key] = nxt
+                s3n = nxt
+
+            new_s1 = compute_members_collection_s1(dt, ch, s3n)
+            if new_s1 is None:
+                continue
+
+            if item['s1'] != new_s1 or item['s3'] != s3n:
+                conn.execute(
+                    text('UPDATE members_collection SET s3=:s3, s1=:s1 WHERE id=:id'),
+                    {'s3': int(s3n), 's1': int(new_s1), 'id': item['id']}
+                )
+                updated += 1
+    return updated
 
 
 # --- Table definitions and helpers ---
@@ -320,6 +486,16 @@ def create_tables():
 
     try:
         # Remove duplicate s1 values in members_collection before adding unique index
+        deduplicate_members_collection_s1()
+    except Exception:
+        pass
+
+    try:
+        backfill_members_collection_identifiers()
+    except Exception:
+        pass
+
+    try:
         deduplicate_members_collection_s1()
     except Exception:
         pass

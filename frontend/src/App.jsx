@@ -293,7 +293,16 @@ export default function App(){
     }catch(e){ setStatus('Upload failed: '+e.message) }
   }
 
-  function coerceValue(key, val){ if(val===null||val===undefined||val==='') return null; if(typeof val==='number') return val; const sval = String(val).trim(); if(key==='s2'){ const d=new Date(sval); if(!isNaN(d)) return d.toISOString(); return sval } if(key==='s1'){ const n=parseInt(sval.replace(/[^0-9-]/g,''),10); return isNaN(n)? null: n } const sNumeric = new Set(['s3','s5','s6','s7','s8','s9','s13']); if(sNumeric.has(key) || key.startsWith('c') || key.startsWith('l')){ const n=Number(sval.replace(/[^0-9.\-]/g,'')); return isNaN(n)? null: n } return sval }
+  function coerceValue(key, val){
+    if(val===null||val===undefined||val==='') return null;
+    const sString = new Set(['s4','s10','s11','s12','source','collection_code','notes']);
+    const sNumeric = new Set(['s1','s3','s5','s6','s7','s8','s9','s13']);
+    const sval = String(val).trim();
+    if(key==='s2'){ const d=new Date(sval); if(!isNaN(d)) return d.toISOString(); return sval }
+    if(sString.has(key)) return sval;
+    if(sNumeric.has(key) || key.startsWith('c') || key.startsWith('l')){ const n=Number(sval.replace(/[^0-9.\-]/g,'')); return isNaN(n)? null: n }
+    return typeof val==='number' ? val : sval;
+  }
 
   function recomputeMappedPreview(mappingToUse = mapping){
     const rows = (fullPreview||[]).map(r=>{
@@ -902,7 +911,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
 
   function recomputeMappedPreview(mappingToUse = mapping, rowsSource = null){
     const rowsSrc = rowsSource || preview || fullPreview || [];
-    const rows = (rowsSrc||[]).map(r=>{
+    const rows = (rowsSrc||[]).map((r, idx)=>{
       const out = {collection_code:'import'};
       if(selectedChurch) out.church = selectedChurch;
       if(selectedDate) out.s2 = new Date(selectedDate).toISOString();
@@ -929,6 +938,9 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
               if(out.church==null && !isNaN(churchEx)) out.church = churchEx;
             }
           }catch(e){}
+        }
+        if(out.s3===null || out.s3===undefined || out.s3===''){
+          out.s3 = idx + 1;
         }
       }catch(e){}
       return out
@@ -1020,8 +1032,8 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
             <label style={{marginLeft:8}}>Uploader name:</label>
             <input value={uploaderName} onChange={e=>{ setUploaderName(e.target.value); recomputeMappedPreview() }} />
           </div>
-          <div style={{marginTop:8}}>
-                <table border={1} cellPadding={6} style={{borderCollapse:'collapse'}}>
+              <div style={{marginTop:8, maxHeight: 380, overflow: 'auto', border: '1px solid #ddd'}}>
+                <table border={1} cellPadding={6} style={{borderCollapse:'collapse', minWidth:'max-content'}}>
               <thead><tr><th>Header</th><th>Map to</th></tr></thead>
               <tbody>{headers.map(h=> (
                 <tr key={h}><td>{h}</td><td>
@@ -1052,9 +1064,9 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       {step===3 && (
         <div>
           <h4>Mapped preview ({mappedPreview.length} rows)</h4>
-          <div style={{maxHeight:400, overflow:'auto'}}>
-            <table style={{width:'100%'}}>
-              <thead><tr>{mappedPreview[0] ? Object.keys(mappedPreview[0]).map(k=> <th key={k}>{labelForColumn(k)}</th>) : <th>No rows</th>}</tr></thead>
+          <div style={{maxHeight:400, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd'}}>
+            <table style={{width:'100%', minWidth:'max-content', borderCollapse:'separate', borderSpacing:0}}>
+              <thead><tr>{mappedPreview[0] ? Object.keys(mappedPreview[0]).map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>{labelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
               <tbody>{mappedPreview.map((r,idx)=> (
                 <tr key={idx}>{Object.keys(r).map(k=> <td key={k}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} /></td>)}</tr>
               ))}</tbody>

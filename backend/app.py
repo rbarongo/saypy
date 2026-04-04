@@ -19,6 +19,8 @@ from .db import (
     verify_user,
     create_token_for_user,
     get_user_by_token,
+    normalize_members_collection_rows,
+    compute_members_collection_s1,
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import inspect, text
@@ -346,6 +348,18 @@ def update_members_collection(row_id: int, payload: dict):
         update_cols = {k: v for k, v in payload.items() if k in cols and k != 'id'}
         if not update_cols:
             raise HTTPException(status_code=400, detail='No updatable columns provided')
+
+        if any(k in update_cols for k in ('s2', 's3', 'church', 's1')):
+            with engine.connect() as conn:
+                cur = conn.execute(text('SELECT s2, s3, church FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if cur:
+                s2_val = update_cols.get('s2', cur[0])
+                s3_val = update_cols.get('s3', cur[1])
+                church_val = update_cols.get('church', cur[2])
+                s1_val = compute_members_collection_s1(s2_val, church_val, s3_val)
+                if s1_val is not None:
+                    update_cols['s1'] = int(s1_val)
+
         set_parts = ', '.join([f"{c}=:{c}" for c in update_cols.keys()])
         params = dict(update_cols)
         params['id'] = row_id
@@ -368,16 +382,14 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
     received_count = len(rows) if rows is not None else 0
     if not rows:
         raise HTTPException(status_code=400, detail={"message": "No rows provided", "received": received_count})
-    # Pre-process rows: compute s1 when possible, resolve church names
-    # If API key present, use uploader defaults
+    # Pre-process rows: resolve church names/defaults and normalize identifiers.
     uploader = auth.get('uploader') if isinstance(auth, dict) else None
-    errors = []
-    valid_rows = []
+    pre_rows = []
     for i, r in enumerate(rows):
         row = dict(r)
+
         # resolve church name -> id if necessary
         church_val = row.get('church')
-        # if uploader present and no church provided, set uploader's church
         if (church_val is None or church_val == '') and uploader and uploader.get('church'):
             row['church'] = uploader.get('church')
         if church_val is not None and not isinstance(church_val, int):
@@ -394,39 +406,10 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
             except Exception:
                 pass
 
-        # compute s1 if missing or placeholder (e.g. 1)
-        try:
-            s1_raw = row.get('s1')
-        except Exception:
-            s1_raw = None
-        if not s1_raw or (isinstance(s1_raw, (int, str)) and str(s1_raw).strip() == '1'):
-            try:
-                s2val = row.get('s2')
-                if isinstance(s2val, str):
-                    s2dt = datetime.fromisoformat(s2val)
-                elif isinstance(s2val, datetime):
-                    s2dt = s2val
-                else:
-                    s2dt = None
-                s3val = row.get('s3')
-                s3int = int(s3val) if s3val is not None and str(s3val).strip() != '' else None
-                church_id = row.get('church') or (uploader.get('church') if uploader else 1)
-                if s2dt and s3int is not None:
-                    ymd = s2dt.strftime('%Y%m%d')
-                    row['s1'] = int(f"{ymd}{int(church_id):03d}{int(s3int):03d}")
-            except Exception:
-                pass
-        # coerce s1 to int for numeric s1 requirement
-        if row.get('s1') is not None and not isinstance(row.get('s1'), int):
-            try:
-                row['s1'] = int(row['s1'])
-            except Exception:
-                try:
-                    import re
-                    digs = re.sub(r'[^0-9]', '', str(row['s1']))
-                    row['s1'] = int(digs) if digs else row['s1']
-                except Exception:
-                    pass
+        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
+            if row.get(sk) is not None and not isinstance(row.get(sk), str):
+                row[sk] = str(row.get(sk))
+
         # set source from uploader if not present
         try:
             if uploader and not row.get('source'):
@@ -434,6 +417,12 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
         except Exception:
             pass
 
+        pre_rows.append(row)
+
+    normalized_rows = normalize_members_collection_rows(pre_rows, fill_missing_s3=True, recompute_s1=True)
+    errors = []
+    valid_rows = []
+    for i, row in enumerate(normalized_rows):
         try:
             validated = MembersCollectionRow(**row)
             valid_rows.append(validated.dict())
@@ -442,7 +431,7 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
 
     if errors:
         # echo received count and rows for debugging
-        raise HTTPException(status_code=422, detail={"received": received_count, "validation_errors": errors, "rows": rows})
+        raise HTTPException(status_code=422, detail={"received": received_count, "validation_errors": errors, "rows": normalized_rows})
 
     try:
         # Normalize Decimal -> int/float for DB driver compatibility
@@ -485,10 +474,10 @@ def list_collection_codes():
 class MembersCollectionRow(BaseModel):
     collection_code: Optional[str] = None
     member_id: Optional[int] = None
-    # Required: s1,s2,s3,s4. s1 may be computed if missing or placeholder before validation.
-    s1: int
+    # s1/s3 can be auto-generated from s2 + church daily sequence.
+    s1: Optional[int] = None
     s2: datetime
-    s3: int
+    s3: Optional[int] = None
     s4: str
     # optional monetary/other fields
     s5: Optional[float] = None
@@ -570,7 +559,7 @@ class MembersCollectionRow(BaseModel):
 def validate_members_collections(rows: List[dict], auth: dict = Depends(require_api_key_or_user), request: Request = None):
     """Validate rows and return per-row validation errors (if any)."""
     errors = []
-    out_rows = []
+    pre_rows = []
     # If API key present, use uploader to default church/source
     uploader = auth.get('uploader') if isinstance(auth, dict) else None
 
@@ -596,45 +585,16 @@ def validate_members_collections(rows: List[dict], auth: dict = Depends(require_
                 # leave as-is; validation will catch missing church if required elsewhere
                 pass
 
-        # Compute s1 if missing or placeholder and s2/s3 present
-        try:
-            s1_raw = row.get('s1')
-        except Exception:
-            s1_raw = None
-        if not s1_raw or (isinstance(s1_raw, (int, str)) and str(s1_raw).strip() == '1'):
-            try:
-                s2val = row.get('s2')
-                if isinstance(s2val, str):
-                    s2dt = datetime.fromisoformat(s2val)
-                elif isinstance(s2val, datetime):
-                    s2dt = s2val
-                else:
-                    s2dt = None
-                s3val = row.get('s3')
-                s3int = int(s3val) if s3val is not None and str(s3val).strip() != '' else None
-                church_id = row.get('church') or 1
-                if s2dt and s3int is not None:
-                    ymd = s2dt.strftime('%Y%m%d')
-                    row['s1'] = int(f"{ymd}{int(church_id):03d}{int(s3int):03d}")
-            except Exception:
-                pass
+        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
+            if row.get(sk) is not None and not isinstance(row.get(sk), str):
+                row[sk] = str(row.get(sk))
 
-        # coerce s1 to int to satisfy numeric s1 requirement
-        if row.get('s1') is not None and not isinstance(row.get('s1'), int):
-            try:
-                row['s1'] = int(row['s1'])
-            except Exception:
-                try:
-                    # fallback: remove non-digits then parse
-                    import re
-                    digs = re.sub(r'[^0-9]', '', str(row['s1']))
-                    row['s1'] = int(digs) if digs else row['s1']
-                except Exception:
-                    pass
+        pre_rows.append(row)
 
+    out_rows = normalize_members_collection_rows(pre_rows, fill_missing_s3=True, recompute_s1=True)
+    for i, row in enumerate(out_rows):
         try:
             MembersCollectionRow(**row)
-            out_rows.append(row)
         except ValidationError as ve:
             errors.append({"index": i, "errors": ve.errors()})
     return {"validation_errors": errors, "rows": out_rows}
