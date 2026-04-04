@@ -1,6 +1,57 @@
 import React, { useState, useEffect } from 'react'
 import './styles.css'
 
+// StatusAlert component with copy button for error/warning messages
+function StatusAlert({message, type='info'}){
+  const [copied, setCopied] = useState(false)
+  if(!message) return null
+  const copyToClipboard = ()=>{
+    navigator.clipboard.writeText(message).then(()=>{
+      setCopied(true)
+      setTimeout(()=>setCopied(false), 2000)
+    }).catch(()=>{})
+  }
+  const bgColor = type==='error' ? '#fee' : type==='warning' ? '#fef3cd' : '#e7f3ff'
+  const borderColor = type==='error' ? '#f88' : type==='warning' ? '#ffc107' : '#2196f3'
+  const textColor = type==='error' ? '#922' : type==='warning' ? '#856404' : '#004085'
+  return (
+    <div style={{marginTop:12, padding:10, background:bgColor, border:`1px solid ${borderColor}`, borderRadius:6, color:textColor, fontSize:14, display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'text'}}>
+      <span style={{flex:1, wordBreak:'break-word'}}>{message}</span>
+      <button onClick={copyToClipboard} style={{marginLeft:12, padding:'4px 8px', fontSize:12, whiteSpace:'nowrap', background:'transparent', border:`1px solid ${borderColor}`, color: textColor, borderRadius:4, cursor:'pointer'}}>
+        {copied? '✓ Copied':'Copy'}
+      </button>
+    </div>
+  )
+}
+
+// ErrorList component with copy button for validation errors
+function ErrorList({errors, title='Errors'}){
+  const [copied, setCopied] = useState(false)
+  if(!errors || !errors.length) return <div style={{marginTop:8}}>No errors</div>
+  
+  const errorText = errors.join('\n')
+  const copyToClipboard = ()=>{
+    navigator.clipboard.writeText(errorText).then(()=>{
+      setCopied(true)
+      setTimeout(()=>setCopied(false), 2000)
+    }).catch(()=>{})
+  }
+  
+  return (
+    <div style={{marginTop:8, background:'#fee', border:'1px solid #f88', borderRadius:6, padding:10}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
+        <strong style={{color:'#922'}}>{title} ({errors.length})</strong>
+        <button onClick={copyToClipboard} style={{padding:'4px 8px', fontSize:12, background:'transparent', border:'1px solid #f88', color:'#922', borderRadius:4, cursor:'pointer'}}>
+          {copied? '✓ Copied':'Copy all'}
+        </button>
+      </div>
+      <ul style={{margin:'0 0 0 20px', padding:0, color:'#922', userSelect:'text'}}>
+        {errors.map((e, i)=> <li key={i} style={{marginBottom:6, wordBreak:'break-word'}}>{e}</li>)}
+      </ul>
+    </div>
+  )
+}
+
 const LOCAL_API_BASE = 'http://localhost:8000'
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
 
@@ -387,6 +438,7 @@ export default function App(){
 
   // If not authenticated, show a focused login screen (no menu)
   if(!user){
+    const statusType = status.toLowerCase().includes('fail') || status.toLowerCase().includes('error') ? 'error' : status.toLowerCase().includes('success') || status.toLowerCase().includes('logged') ? 'info' : 'info'
     return (
       <div style={{fontFamily:'Arial',padding:18}}>
         <h2>Church Offerings — Login</h2>
@@ -394,7 +446,7 @@ export default function App(){
           <input placeholder='username' value={loginUser} onChange={e=>setLoginUser(e.target.value)} />
           <input placeholder='password' type='password' value={loginPass} onChange={e=>setLoginPass(e.target.value)} />
           <button onClick={doLogin}>Login</button>
-          <div style={{marginTop:8,color:'#666'}}>{status}</div>
+          {status && <StatusAlert message={status} type={statusType} />}
         </div>
       </div>
     )
@@ -412,13 +464,13 @@ export default function App(){
         </div>
       </header>
 
-      <nav style={{marginTop:12, marginBottom:12}}>
+      <nav style={{marginTop:12, marginBottom:12, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
         <button onClick={()=>setPage('collections')}>Collections</button>
         <button onClick={()=>setPage('members')}>Members</button>
         <button onClick={()=>setPage('members_collections')}>Members Collections</button>
         <button onClick={()=>setPage('reports')}>Reports</button>
         {isAdmin() && <button onClick={()=>{ setPage('admin'); fetchUsers() }}>Admin</button>}
-        <span style={{marginLeft:12,color:'#666'}}>{status}</span>
+        {status && <StatusAlert message={status} type={status.toLowerCase().includes('fail') || status.toLowerCase().includes('error') ? 'error' : 'info'} />}
       </nav>
 
       <main style={{borderTop:'1px solid #eee', paddingTop:12}}>
@@ -1083,13 +1135,11 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         <div>
           <h4>Fix validation errors</h4>
           {validationErrors && validationErrors.length ? (
-            <ul>
-              {formatValidationErrors(validationErrors).map((m,i)=> <li key={i}>{m}</li>)}
-            </ul>
+            <ErrorList errors={formatValidationErrors(validationErrors)} title='Validation Errors' />
           ) : (
             <div>No validation errors</div>
           )}
-          <button onClick={()=>setStep(3)}>Back to preview</button>
+          <button onClick={()=>setStep(3)} style={{marginTop:12}}>Back to preview</button>
         </div>
       )}
 

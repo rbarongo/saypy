@@ -81,3 +81,92 @@ tbody tr:nth-child(odd) td{background:rgba(255,255,255,0.01)}
 
 /* responsive wrap for collections rows */
 .collection-cell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;display:inline-block}
+
+/* Alert and Error components - copyable messages */
+.status-alert {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: text;
+  word-break: break-word;
+}
+
+.status-alert.info {
+  background-color: #e7f3ff;
+  border: 1px solid #2196f3;
+  color: #004085;
+}
+
+.status-alert.error {
+  background-color: #fee;
+  border: 1px solid #f88;
+  color: #922;
+}
+
+.status-alert.warning {
+  background-color: #fef3cd;
+  border: 1px solid #ffc107;
+  color: #856404;
+}
+
+.status-alert button {
+  margin-left: 12px;
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.status-alert button:hover {
+  opacity: 0.8;
+}
+
+.error-list {
+  margin-top: 8px;
+  background: #fee;
+  border: 1px solid #f88;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.error-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  color: #922;
+  font-weight: bold;
+}
+
+.error-list-items {
+  margin: 0 0 0 20px;
+  padding: 0;
+  color: #922;
+  user-select: text;
+}
+
+.error-list-items li {
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.error-list-header button {
+  padding: 4px 8px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid #f88;
+  color: #922;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.error-list-header button:hover {
+  opacity: 0.8;
+}
