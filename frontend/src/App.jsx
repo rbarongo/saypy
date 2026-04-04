@@ -539,6 +539,7 @@ export default function App(){
               churches={churches}
               fetchCodes={fetchCodes}
               user={user}
+              labelForColumn={labelForColumn}
             />
             {showCollectionsTable && (
               <div style={{marginTop:12}}>
@@ -837,7 +838,7 @@ function CreateUserForm({onCreate, churches}){
   )
 }
 
-function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user}){
+function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn}){
   // simplified copy of the prior upload UI kept local to this component scope
   const [step, setStep] = useState(1)
   const [file, setFile] = useState(null)
