@@ -131,7 +131,7 @@ metadata = MetaData()
 members = Table(
     'members', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('sno', Integer, primary_key=True, nullable=False),
+    Column('sno', Integer, nullable=False, unique=True),
     Column('MEMBER_NAME', String(300), nullable=True),
     Column('church', Integer, nullable=True),
     Column('MEMBER_ID', Integer, nullable=True),
@@ -293,7 +293,19 @@ tokens = Table(
 def create_tables():
     """Create `members` and `members_collection` tables if they do not exist."""
     ensure_db_exists()
-    metadata.create_all(engine, tables=[church, members, members_collection, collection_codes, header_mappings, uploaders, users, tokens])
+    # Create base tables first.
+    metadata.create_all(engine, tables=[church, members, collection_codes, header_mappings, uploaders, users, tokens])
+
+    # Ensure referenced members columns are uniquely constrained before creating dependent FKs.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_id_unique ON members(id)'))
+            conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_sno_unique ON members(sno)'))
+    except Exception:
+        pass
+
+    # Create dependent table after uniqueness constraints exist.
+    metadata.create_all(engine, tables=[members_collection])
     # Ensure any new columns are present on existing tables (simple ALTER TABLE add column migration)
     try:
         ensure_members_collection_schema()
@@ -312,24 +324,9 @@ def create_tables():
     except Exception:
         pass
 
-    # Ensure a unique index on `sno` to prevent future duplicates
     try:
-        with engine.connect() as conn:
-            conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_sno_unique ON members(sno)'))
-            try:
-                conn.commit()
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_collection_s1_unique ON members_collection(s1)'))
-            try:
-                conn.commit()
-            except Exception:
-                pass
     except Exception:
         pass
 
