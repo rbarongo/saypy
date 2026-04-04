@@ -1,6 +1,26 @@
 import React, { useState, useEffect } from 'react'
 import './styles.css'
 
+const LOCAL_API_BASE = 'http://localhost:8000'
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+
+function rewriteApiUrl(input){
+  const base = API_BASE || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000` : LOCAL_API_BASE)
+  if(typeof input === 'string' && input.startsWith(LOCAL_API_BASE)){
+    return `${base}${input.slice(LOCAL_API_BASE.length)}`
+  }
+  if(typeof Request !== 'undefined' && input instanceof Request && input.url.startsWith(LOCAL_API_BASE)){
+    return new Request(`${base}${input.url.slice(LOCAL_API_BASE.length)}`, input)
+  }
+  return input
+}
+
+if(typeof window !== 'undefined' && !window.__saypyFetchPatched){
+  const nativeFetch = window.fetch.bind(window)
+  window.fetch = (input, init) => nativeFetch(rewriteApiUrl(input), init)
+  window.__saypyFetchPatched = true
+}
+
 // Single-file frontend with Login, RBAC, and pages for Admin/Members/Collections/Reports
 export default function App(){
   const [page, setPage] = useState('collections') // default landing

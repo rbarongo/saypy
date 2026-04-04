@@ -2,6 +2,7 @@ import os
 import hashlib
 import binascii
 import uuid
+from urllib.parse import quote_plus
 from datetime import datetime, timedelta
 from typing import List
 import pandas as pd
@@ -21,6 +22,32 @@ BASE_DIR = os.path.dirname(__file__)
 # Config: DB_ENGINE can be 'sqlite' or 'postgres' (or 'postgresql')
 DB_ENGINE = os.getenv("DB_ENGINE", "sqlite").lower()
 
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
+def _build_postgres_url_from_parts() -> str:
+    """Build a postgresql:// URL from discrete PG* env vars when DATABASE_URL is absent."""
+    host = os.getenv("PGHOST") or os.getenv("POSTGRES_HOST") or os.getenv("DB_HOST")
+    dbname = os.getenv("PGDATABASE") or os.getenv("POSTGRES_DB") or os.getenv("DB_NAME")
+    user = os.getenv("PGUSER") or os.getenv("POSTGRES_USER") or os.getenv("DB_USER")
+    password = os.getenv("PGPASSWORD") or os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD")
+    port = os.getenv("PGPORT") or os.getenv("POSTGRES_PORT") or os.getenv("DB_PORT") or "5432"
+
+    if not all([host, dbname, user, password]):
+        return ""
+
+    user_escaped = quote_plus(str(user))
+    password_escaped = quote_plus(str(password))
+    return f"postgresql://{user_escaped}:{password_escaped}@{host}:{port}/{dbname}"
+
 # If DATABASE_URL is set (recommended for Postgres), use it. Otherwise for sqlite build file path.
 _sqlite_default_path = os.path.join(BASE_DIR, "members.db")
 if DB_ENGINE in ("sqlite", "sqlite3"):
@@ -28,14 +55,33 @@ if DB_ENGINE in ("sqlite", "sqlite3"):
     DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{SQLITE_PATH}")
 else:
     # For postgres: expect DATABASE_URL like 'postgresql://user:pass@host:port/dbname'
-    DATABASE_URL = os.getenv("DATABASE_URL", "")
+    DATABASE_URL = os.getenv("DATABASE_URL", "") or _build_postgres_url_from_parts()
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
     if not DATABASE_URL:
-        raise RuntimeError("DB_ENGINE set to postgres but DATABASE_URL is not provided in environment")
+        raise RuntimeError(
+            "DB_ENGINE is postgres but no DB config was found. Set DATABASE_URL or PGHOST/PGDATABASE/PGUSER/PGPASSWORD."
+        )
 
 # Create SQLAlchemy engine. For sqlite we need connect_args to allow multithreaded access
 engine_kwargs = {}
 if DB_ENGINE in ("sqlite", "sqlite3"):
     engine_kwargs = {"connect_args": {"check_same_thread": False}}
+else:
+    connect_args = {}
+    sslmode = os.getenv("DB_SSLMODE", "").strip()
+    if sslmode:
+        connect_args["sslmode"] = sslmode
+
+    engine_kwargs = {
+        "pool_pre_ping": True,
+        "pool_size": _env_int("DB_POOL_SIZE", 5),
+        "max_overflow": _env_int("DB_MAX_OVERFLOW", 10),
+        "pool_timeout": _env_int("DB_POOL_TIMEOUT", 30),
+        "pool_recycle": _env_int("DB_POOL_RECYCLE", 1800),
+    }
+    if connect_args:
+        engine_kwargs["connect_args"] = connect_args
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 
@@ -300,22 +346,26 @@ def create_uploader(name: str, church_id: Optional[int] = None) -> str:
     import uuid
     api_key = uuid.uuid4().hex
     with engine.connect() as conn:
+        tx = conn.begin()
         try:
             conn.execute(sql_insert(uploaders).values(name=name, api_key=api_key, church=church_id))
+            tx.commit()
+        except Exception:
+            # Ensure failed transaction is cleared before retrying on the same connection.
             try:
-                conn.commit()
+                tx.rollback()
             except Exception:
                 pass
-        except Exception:
-            # try to generate another key on collision
             api_key = uuid.uuid4().hex
+            tx2 = conn.begin()
             try:
                 conn.execute(sql_insert(uploaders).values(name=name, api_key=api_key, church=church_id))
+                tx2.commit()
+            except Exception:
                 try:
-                    conn.commit()
+                    tx2.rollback()
                 except Exception:
                     pass
-            except Exception:
                 raise
     return api_key
 
@@ -356,12 +406,11 @@ def create_user(username: str, password: str, church_id: Optional[int] = None, r
     salt = os.urandom(16)
     ph = _hash_password(password, salt)
     salt_hex = binascii.hexlify(salt).decode('ascii')
-    with engine.connect() as conn:
+    # Atomic write: commit on success, rollback on failure.
+    with engine.begin() as conn:
         conn.execute(sql_insert(users).values(username=username, password_hash=ph, salt=salt_hex, church=church_id, role=role))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+
+    with engine.connect() as conn:
         res = conn.execute(text('SELECT id, username, church, role FROM users WHERE username=:u'), {'u': username})
         row = res.fetchone()
         if not row:
@@ -386,12 +435,8 @@ def verify_user(username: str, password: str) -> Optional[dict]:
 def create_token_for_user(user_id: int) -> str:
     ensure_db_exists()
     tok = uuid.uuid4().hex
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(sql_insert(tokens).values(token=tok, user_id=user_id))
-        try:
-            conn.commit()
-        except Exception:
-            pass
     return tok
 
 
@@ -710,9 +755,8 @@ def insert_members_collection(collection_code: str, member_id: Optional[int] = N
     ensure_db_exists()
     stmt = sql_insert(members_collection).values(collection_code=collection_code, member_id=member_id, church=church)
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             res = conn.execute(stmt)
-            conn.commit()
             try:
                 pk = res.inserted_primary_key[0]
             except Exception:

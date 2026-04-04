@@ -9,6 +9,38 @@ Requirements:
 pip install -r requirements.txt
 ```
 
+Environment configuration:
+
+1. Copy `.env.example` to `.env`.
+2. Use SQLite (default) or switch to cloud Postgres.
+
+SQLite example:
+
+```
+DB_ENGINE=sqlite
+SQLITE_PATH=./members.db
+```
+
+Cloud Postgres example (single URL):
+
+```
+DB_ENGINE=postgres
+DATABASE_URL=postgresql://user:password@db-host:5432/dbname
+DB_SSLMODE=require
+```
+
+Cloud Postgres example (separate entries):
+
+```
+DB_ENGINE=postgres
+PGHOST=db-host
+PGPORT=5432
+PGDATABASE=dbname
+PGUSER=dbuser
+PGPASSWORD=dbpassword
+DB_SSLMODE=require
+```
+
 Migration from Access to SQLite:
 
 1. Ensure Microsoft Access ODBC Driver is installed on Windows.
