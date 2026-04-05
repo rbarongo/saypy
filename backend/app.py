@@ -38,6 +38,56 @@ logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+ROLE_SYSTEM_ADMIN = 'system_admin'
+ROLE_ADMIN = 'admin'
+ROLE_TREASURER = 'treasurer'
+ROLE_DATA_STEWARD = 'data_steward'
+ROLE_UPLOADER = 'uploader'
+ROLE_VIEWER = 'viewer'
+ALL_ROLES = {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER}
+
+
+def _normalize_user_context(user: Optional[dict]) -> Optional[dict]:
+    if not isinstance(user, dict):
+        return user
+    u = dict(user)
+    uname = str(u.get('username') or '').strip().lower()
+    role = str(u.get('role') or ROLE_UPLOADER).strip().lower()
+    if uname == 'saypy_admin':
+        u['role'] = ROLE_SYSTEM_ADMIN
+        u['church'] = None
+        return u
+    if role not in ALL_ROLES:
+        u['role'] = ROLE_UPLOADER
+    else:
+        u['role'] = role
+    return u
+
+
+def _is_system_admin_user(user: Optional[dict]) -> bool:
+    if not isinstance(user, dict):
+        return False
+    return str(user.get('role') or '').lower() == ROLE_SYSTEM_ADMIN
+
+
+def _auth_role(auth: dict) -> Optional[str]:
+    if not isinstance(auth, dict):
+        return None
+    u = auth.get('user') if isinstance(auth.get('user'), dict) else None
+    if u is not None:
+        return str(u.get('role') or '').lower()
+    up = auth.get('uploader') if isinstance(auth.get('uploader'), dict) else None
+    if up is not None:
+        return ROLE_UPLOADER
+    return None
+
+
+def _require_auth_roles(auth: dict, allowed_roles: set, context: str = 'this operation'):
+    role = _auth_role(auth)
+    if role in allowed_roles:
+        return
+    raise HTTPException(status_code=403, detail=f'Not authorized for {context}')
+
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     if not credentials:
@@ -46,7 +96,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     user = get_user_by_token(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
-    return user
+    return _normalize_user_context(user)
 
 
 def require_api_key_or_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
@@ -71,7 +121,7 @@ def require_api_key_or_user(request: Request, credentials: HTTPAuthorizationCred
         user = get_user_by_token(token)
         if not user:
             raise HTTPException(status_code=401, detail='Invalid token')
-        return {'api_key': None, 'uploader': None, 'user': user}
+        return {'api_key': None, 'uploader': None, 'user': _normalize_user_context(user)}
 
     raise HTTPException(status_code=401, detail='Missing authentication (API key or Bearer token)')
 
@@ -108,6 +158,8 @@ def _auth_context_church(auth: dict) -> Optional[int]:
         return None
     u = auth.get('user') if isinstance(auth.get('user'), dict) else None
     up = auth.get('uploader') if isinstance(auth.get('uploader'), dict) else None
+    if _is_system_admin_user(u):
+        return None
     if u and u.get('church') is not None:
         return _resolve_church_id(u.get('church'))
     if up and up.get('church') is not None:
@@ -225,6 +277,7 @@ def _guess_s1_column(df):
 
 @app.post('/upload')
 async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api_key_or_user), request: Request = None):
+    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection upload')
     df = _read_upload_file(batch)
     if df is None:
         raise HTTPException(status_code=400, detail="No data parsed from file")
@@ -275,6 +328,7 @@ async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api
 @app.post('/upload/headers')
 async def upload_headers(batch: UploadFile = File(...), auth: dict = Depends(require_api_key_or_user), request: Request = None):
     """Receive an uploaded Excel/CSV and return headers and first 5 rows for preview without inserting."""
+    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection upload preview')
     df = _read_upload_file(batch)
     if df is None:
         raise HTTPException(status_code=400, detail="No data parsed from file")
@@ -326,6 +380,14 @@ async def submit_form(table_name: str, request: Request, auth: dict = Depends(re
     if not isinstance(payload, dict) or not payload:
         raise HTTPException(status_code=400, detail="No data provided in request body or form")
 
+    # Legacy endpoint role restrictions by target table.
+    if table_name in {"members_collection", "members_collections"}:
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection submission')
+    elif table_name == "members":
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD}, context='member submission')
+    elif table_name == "collection_codes":
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}, context='collection code submission')
+
     # Normalize: convert single-value lists to values
     row = {k: (v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v) for k, v in payload.items()}
     actor_church = _auth_context_church(auth)
@@ -365,6 +427,7 @@ class MemberCollectionIn(BaseModel):
 @app.post('/members')
 def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     """Create a member record and return its id."""
+    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD}, context='member creation')
     actor_church = _auth_context_church(auth)
     effective_church = _enforce_church_scope(payload.church, actor_church, context='member creation')
     pk = insert_member(
@@ -403,6 +466,7 @@ def create_members_collection(payload: MemberCollectionIn, auth: dict = Depends(
 def update_members_collection(row_id: int, payload: dict, auth: dict = Depends(require_api_key_or_user)):
     """Update a members_collection row by id. Accepts any subset of columns present in the table."""
     try:
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection update')
         # limit updates to known columns to avoid SQL injection
         cols = get_target_columns('members_collection')
         if not cols:
@@ -450,6 +514,7 @@ def update_members_collection(row_id: int, payload: dict, auth: dict = Depends(r
 @app.post('/members_collections/bulk')
 def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(require_api_key_or_user), request: Request = None):
     """Accept a list of dicts and insert into `members_collection` in bulk."""
+    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='bulk collection insert')
     received_count = len(rows) if rows is not None else 0
     if not rows:
         raise HTTPException(status_code=400, detail={"message": "No rows provided", "received": received_count})
@@ -618,6 +683,7 @@ class MembersCollectionRow(BaseModel):
 @app.post('/members_collections/validate')
 def validate_members_collections(rows: List[dict], auth: dict = Depends(require_api_key_or_user), request: Request = None):
     """Validate rows and return per-row validation errors (if any)."""
+    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection validation')
     errors = []
     pre_rows = []
     # If API key present, use uploader to default church/source
@@ -653,8 +719,9 @@ class CollectionCodeIn(BaseModel):
 
 
 @app.post('/collection_codes')
-def create_collection_code(payload: CollectionCodeIn):
+def create_collection_code(payload: CollectionCodeIn, auth: dict = Depends(require_api_key_or_user)):
     try:
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}, context='collection code creation')
         with engine.connect() as conn:
             res = conn.execute(text("INSERT INTO collection_codes (column_name, code) VALUES (:cn, :c)"), {"cn": payload.column_name, "c": payload.code})
             try:
@@ -667,9 +734,10 @@ def create_collection_code(payload: CollectionCodeIn):
 
 
 @app.post('/header_mappings')
-def save_header_mappings(arr: List[dict]):
+def save_header_mappings(arr: List[dict], auth: dict = Depends(require_api_key_or_user)):
     """Save provided header->mapped_column mappings. Expects list of {header_name, mapped_column}."""
     try:
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='header mapping save')
         upsert_header_mappings(arr)
         return {"ok": True}
     except Exception as e:
@@ -684,7 +752,9 @@ class UploaderIn(BaseModel):
 @app.post('/uploaders')
 def create_uploader_endpoint(payload: UploaderIn, current_user: dict = Depends(get_current_user)):
     try:
-        current_church = _resolve_church_id(current_user.get('church'))
+        if str(current_user.get('role') or '').lower() not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Not authorized')
+        current_church = None if str(current_user.get('role') or '').lower() == ROLE_SYSTEM_ADMIN else _resolve_church_id(current_user.get('church'))
         church_id = _enforce_church_scope(payload.church, current_church, context='uploader creation')
         key = create_uploader(payload.name, church_id)
         return {"api_key": key}
@@ -697,8 +767,10 @@ def create_uploader_endpoint(payload: UploaderIn, current_user: dict = Depends(g
 @app.get('/uploaders')
 def list_uploaders_endpoint(current_user: dict = Depends(get_current_user)):
     try:
+        if str(current_user.get('role') or '').lower() not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Not authorized')
         out = list_uploaders()
-        user_church = _resolve_church_id(current_user.get('church')) if isinstance(current_user, dict) else None
+        user_church = None if str(current_user.get('role') or '').lower() == ROLE_SYSTEM_ADMIN else (_resolve_church_id(current_user.get('church')) if isinstance(current_user, dict) else None)
         if user_church is not None:
             out = [u for u in out if _resolve_church_id(u.get('church')) == user_church]
         return out
@@ -709,10 +781,12 @@ def list_uploaders_endpoint(current_user: dict = Depends(get_current_user)):
 @app.get('/uploaders/{api_key}')
 def get_uploader_by_key_endpoint(api_key: str, current_user: dict = Depends(get_current_user)):
     try:
+        if str(current_user.get('role') or '').lower() not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Not authorized')
         u = get_uploader_by_key(api_key)
         if not u:
             raise HTTPException(status_code=404, detail="Uploader not found")
-        user_church = _resolve_church_id(current_user.get('church')) if isinstance(current_user, dict) else None
+        user_church = None if str(current_user.get('role') or '').lower() == ROLE_SYSTEM_ADMIN else (_resolve_church_id(current_user.get('church')) if isinstance(current_user, dict) else None)
         _enforce_church_scope(u.get('church'), user_church, context='uploader details')
         return u
     except HTTPException:
@@ -737,20 +811,23 @@ class UserRegister(BaseModel):
 @app.post('/users/register')
 def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     try:
-        # Default role to 'uploader' unless an admin is creating a different role
-        role = payload.role or 'uploader'
-        if role != 'uploader':
-            # require bearer token of an admin user to create non-uploader roles
-            if not credentials or not credentials.credentials:
-                raise HTTPException(status_code=403, detail='Only admins can create users with elevated roles')
-            creator = get_user_by_token(credentials.credentials)
-            if not creator or creator.get('role') != 'admin':
-                raise HTTPException(status_code=403, detail='Only admins can create users with elevated roles')
+        if not credentials or not credentials.credentials:
+            raise HTTPException(status_code=403, detail='Only admins can create users')
+        creator = _normalize_user_context(get_user_by_token(credentials.credentials))
+        if not creator:
+            raise HTTPException(status_code=401, detail='Invalid token')
 
-        creator_church = None
-        if credentials and credentials.credentials:
-            creator = get_user_by_token(credentials.credentials)
-            creator_church = _resolve_church_id(creator.get('church')) if creator else None
+        creator_role = str(creator.get('role') or '').lower()
+        if creator_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Only admins can create users')
+
+        role = str(payload.role or ROLE_UPLOADER).strip().lower()
+        if role not in ALL_ROLES:
+            raise HTTPException(status_code=400, detail='Invalid role')
+        if role == ROLE_SYSTEM_ADMIN and creator_role != ROLE_SYSTEM_ADMIN:
+            raise HTTPException(status_code=403, detail='Only system admin can assign system_admin role')
+
+        creator_church = None if creator_role == ROLE_SYSTEM_ADMIN else _resolve_church_id(creator.get('church'))
         requested_church = _resolve_church_id(payload.church)
         effective_church = _enforce_church_scope(requested_church, creator_church, context='user registration')
         out = create_user(payload.username, payload.password, effective_church, role=role)
@@ -766,6 +843,7 @@ def login_user(payload: UserIn):
     u = verify_user(payload.username, payload.password)
     if not u:
         raise HTTPException(status_code=401, detail='Invalid username or password')
+    u = _normalize_user_context(u)
     token = create_token_for_user(u['id'])
     return {"token": token, "user": u}
 
@@ -773,10 +851,10 @@ def login_user(payload: UserIn):
 @app.get('/users')
 def list_users(current_user: dict = Depends(get_current_user)):
     # only admins may list users
-    if current_user.get('role') != 'admin':
+    if str(current_user.get('role') or '').lower() not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
         raise HTTPException(status_code=403, detail='Not authorized')
     try:
-        current_church = _resolve_church_id(current_user.get('church'))
+        current_church = None if str(current_user.get('role') or '').lower() == ROLE_SYSTEM_ADMIN else _resolve_church_id(current_user.get('church'))
         with engine.connect() as conn:
             if current_church is None:
                 res = conn.execute(text('SELECT id, username, church, role, created_at FROM users'))
@@ -791,12 +869,18 @@ def list_users(current_user: dict = Depends(get_current_user)):
 @app.put('/users/{user_id}')
 def update_user(user_id: int, payload: UserRegister, current_user: dict = Depends(get_current_user)):
     # only admins may update users
-    if current_user.get('role') != 'admin':
+    role_self = str(current_user.get('role') or '').lower()
+    if role_self not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
         raise HTTPException(status_code=403, detail='Not authorized')
     try:
-        current_church = _resolve_church_id(current_user.get('church'))
+        current_church = None if role_self == ROLE_SYSTEM_ADMIN else _resolve_church_id(current_user.get('church'))
         requested_church = _resolve_church_id(payload.church)
         effective_church = _enforce_church_scope(requested_church, current_church, context='user update')
+        next_role = str(payload.role or ROLE_UPLOADER).strip().lower()
+        if next_role not in ALL_ROLES:
+            raise HTTPException(status_code=400, detail='Invalid role')
+        if next_role == ROLE_SYSTEM_ADMIN and role_self != ROLE_SYSTEM_ADMIN:
+            raise HTTPException(status_code=403, detail='Only system admin can assign system_admin role')
         # update username, church, role, and optionally password
         with engine.connect() as conn:
             if current_church is not None:
@@ -810,10 +894,10 @@ def update_user(user_id: int, payload: UserRegister, current_user: dict = Depend
                 ph = _hash_password(payload.password, salt)
                 salt_hex = binascii.hexlify(salt).decode('ascii')
                 conn.execute(text('UPDATE users SET username=:u, password_hash=:ph, salt=:s, church=:c, role=:r WHERE id=:id'),
-                             {'u': payload.username, 'ph': ph, 's': salt_hex, 'c': effective_church, 'r': (payload.role or 'uploader'), 'id': user_id})
+                             {'u': payload.username, 'ph': ph, 's': salt_hex, 'c': effective_church, 'r': next_role, 'id': user_id})
             else:
                 conn.execute(text('UPDATE users SET username=:u, church=:c, role=:r WHERE id=:id'),
-                             {'u': payload.username, 'c': effective_church, 'r': (payload.role or 'uploader'), 'id': user_id})
+                             {'u': payload.username, 'c': effective_church, 'r': next_role, 'id': user_id})
             try:
                 conn.commit()
             except Exception:
@@ -851,6 +935,7 @@ def update_collection_code(code_id: int, payload: CollectionCodeIn):
 @app.get('/members')
 def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     try:
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD, ROLE_TREASURER, ROLE_UPLOADER, ROLE_VIEWER}, context='members listing')
         df = pd.read_sql_table('members', con=engine)
         actor_church = _auth_context_church(auth)
         if actor_church is not None and 'church' in df.columns:
@@ -875,6 +960,7 @@ def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_o
 @app.put('/members/{member_id}')
 def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     try:
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD}, context='member update')
         actor_church = _auth_context_church(auth)
         if actor_church is not None:
             with engine.connect() as conn:
@@ -948,6 +1034,7 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
 def report_members_collections(start_date: Optional[str] = None, end_date: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     """Return members_collection rows, optionally filtered by s2 (date) range. Dates in ISO format."""
     try:
+        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER}, context='reports access')
         # Read full table into pandas then filter by s2 in Python to avoid SQL param dialect issues
         df = pd.read_sql_table('members_collection', con=engine)
         actor_church = _auth_context_church(auth)

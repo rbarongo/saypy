@@ -38,6 +38,25 @@ export default function App(){
   function denyRestrictedChurchAccess(context){
     setStatus(`Restricted information: you cannot access ${context} for another church`)
   }
+  function roleLabel(role){
+    const map = {
+      system_admin: 'System Admin',
+      admin: 'Church Admin',
+      treasurer: 'Treasurer',
+      data_steward: 'Data Steward',
+      uploader: 'Uploader',
+      viewer: 'Viewer',
+    }
+    return map[String(role||'').toLowerCase()] || String(role || '')
+  }
+
+  function roleOptionsForCurrentUser(){
+    const me = String(user?.role || '').toLowerCase()
+    if(me === 'system_admin'){
+      return ['admin','treasurer','data_steward','uploader','viewer','system_admin']
+    }
+    return ['admin','treasurer','data_steward','uploader','viewer']
+  }
 
   // ----- Shared data -----
   const [churches, setChurches] = useState([])
@@ -456,7 +475,7 @@ export default function App(){
   }
 
   // ----- Simple helpers for role checks -----
-  function isAdmin(){ return user && user.role === 'admin' }
+  function isAdmin(){ return user && (user.role === 'admin' || user.role === 'system_admin') }
   function isUploader(){ return user && user.role === 'uploader' }
 
   // If not authenticated, show a focused login screen (no menu)
@@ -517,7 +536,7 @@ export default function App(){
                       <tr key={u.id}>
                         <td>{u.id}</td>
                         <td>{u.username}</td>
-                        <td>{u.role}</td>
+                        <td>{roleLabel(u.role)}</td>
                         <td>{chName}</td>
                         <td>
                           <button onClick={()=>beginEditUser(u)}>Edit</button>
@@ -535,9 +554,9 @@ export default function App(){
                   <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                     <input value={userEditForm.username} placeholder='username' onChange={e=>setUserEditForm(prev=>({...prev, username:e.target.value}))} />
                     <select value={userEditForm.role} onChange={e=>setUserEditForm(prev=>({...prev, role:e.target.value}))}>
-                      <option value='uploader'>uploader</option>
-                      <option value='admin'>admin</option>
+                      {roleOptionsForCurrentUser().map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                     </select>
+                                  <CreateUserForm onCreate={(u,p,c,r)=> createUser(u,p,c,r)} churches={churches} scopedChurchId={currentUserChurchId} canAccessChurch={canAccessChurch} onRestrictedChurchAttempt={denyRestrictedChurchAccess} roleOptions={roleOptionsForCurrentUser()} roleLabel={roleLabel} />
                     <select value={userEditForm.church ?? ''} onChange={e=>{
                       const v = e.target.value
                       if(!canAccessChurch(v)){ denyRestrictedChurchAccess('user management'); return }
@@ -954,11 +973,11 @@ export default function App(){
 }
 
 // ----- Subcomponents -----
-function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, onRestrictedChurchAttempt}){
+function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, onRestrictedChurchAttempt, roleOptions = ['uploader'], roleLabel = (r)=>String(r)}){
   const [u, setU] = useState('')
   const [p, setP] = useState('')
   const [c, setC] = useState(churches[0]?.id || null)
-  const [r, setR] = useState('uploader')
+  const [r, setR] = useState((roleOptions && roleOptions.length ? roleOptions[0] : 'uploader'))
   useEffect(()=>{
     if(scopedChurchId !== null && scopedChurchId !== undefined && !Number.isNaN(Number(scopedChurchId))){
       setC(String(scopedChurchId))
@@ -980,8 +999,7 @@ function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, on
         {churches.map(ch=> <option key={ch.id} value={ch.id} disabled={typeof canAccessChurch === 'function' ? !canAccessChurch(ch.id) : false}>{ch.name}</option>)}
       </select>
       <select value={r} onChange={e=>setR(e.target.value)}>
-        <option value='uploader'>uploader</option>
-        <option value='admin'>admin</option>
+        {(roleOptions && roleOptions.length ? roleOptions : ['uploader']).map(opt => <option key={opt} value={opt}>{roleLabel(opt)}</option>)}
       </select>
       <button onClick={()=> onCreate(u,p,c,r)}>Create</button>
     </div>
