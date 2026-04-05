@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 # Use SQLAlchemy to support both SQLite and Postgres via a single API
 from sqlalchemy import create_engine, inspect
-from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, DateTime, func, text, Numeric, BigInteger
+from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, DateTime, func, text, Numeric
 from sqlalchemy import insert as sql_insert
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, Dict, Tuple
@@ -142,6 +142,18 @@ def _coerce_int(v) -> Optional[int]:
         return None
 
 
+def _coerce_s1_text(v) -> Optional[str]:
+    if v is None:
+        return None
+    n = _coerce_int(v)
+    if n is not None:
+        return str(n)
+    s = str(v).strip()
+    if s == "":
+        return None
+    return s
+
+
 def _parse_collection_dt(v) -> Optional[datetime]:
     if v is None:
         return None
@@ -158,7 +170,7 @@ def _parse_collection_dt(v) -> Optional[datetime]:
         return None
 
 
-def compute_members_collection_s1(s2_value, church_value, s3_value) -> Optional[int]:
+def compute_members_collection_s1(s2_value, church_value, s3_value) -> Optional[str]:
     """Build s1 in the format YYYYMMDD + church(3) + s3(3)."""
     s2dt = _parse_collection_dt(s2_value)
     church_id = _coerce_int(church_value)
@@ -166,7 +178,7 @@ def compute_members_collection_s1(s2_value, church_value, s3_value) -> Optional[
     if s2dt is None or church_id is None or s3num is None:
         return None
     ymd = s2dt.strftime('%Y%m%d')
-    return int(f"{ymd}{int(church_id):03d}{int(s3num):03d}")
+    return f"{ymd}{int(church_id):03d}{int(s3num):03d}"
 
 
 def _load_existing_serial_counters(keys: List[Tuple[str, int]]) -> Dict[Tuple[str, int], int]:
@@ -235,7 +247,7 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
         if recompute_s1:
             s1 = compute_members_collection_s1(r.get('s2'), r.get('church'), r.get('s3'))
             if s1 is not None:
-                r['s1'] = int(s1)
+                r['s1'] = str(s1)
 
         out.append(r)
     return out
@@ -264,7 +276,7 @@ def backfill_members_collection_identifiers() -> int:
         key = (dt.strftime('%Y-%m-%d'), int(ch)) if dt is not None and ch is not None else None
         if key and s3n is not None:
             counters[key] = max(counters.get(key, 0), s3n)
-        normalized.append({'id': rid, 'dt': dt, 'church': ch, 's3': s3n, 's1': _coerce_int(s1), 'key': key})
+        normalized.append({'id': rid, 'dt': dt, 'church': ch, 's3': s3n, 's1': _coerce_s1_text(s1), 'key': key})
 
     updated = 0
     with engine.begin() as conn:
@@ -282,10 +294,10 @@ def backfill_members_collection_identifiers() -> int:
             if new_s1 is None:
                 continue
 
-            if item['s1'] != new_s1 or item['s3'] != s3n:
+            if item['s1'] != str(new_s1) or item['s3'] != s3n:
                 conn.execute(
                     text('UPDATE members_collection SET s3=:s3, s1=:s1 WHERE id=:id'),
-                    {'s3': int(s3n), 's1': int(new_s1), 'id': item['id']}
+                    {'s3': int(s3n), 's1': str(new_s1), 'id': item['id']}
                 )
                 updated += 1
     return updated
@@ -331,7 +343,7 @@ members_collection = Table(
     Column('collection_code', String(200), nullable=False),
     Column('member_id', Integer, ForeignKey('members.id'), nullable=True),
     Column('church', Integer, ForeignKey('church.id'), nullable=True),
-    Column('s1', BigInteger, nullable=True),
+    Column('s1', String(32), nullable=True),
     Column('s2', DateTime, nullable=True),
     Column('s3', Integer, nullable=True),
     Column('s4', String(255), nullable=True),
@@ -514,6 +526,41 @@ def create_tables():
         seed_churches()
     except Exception:
         pass
+
+
+def migrate_members_collection_only() -> dict:
+    """Apply only members_collection schema/data migrations.
+
+    This function avoids touching other tables so production updates can be scoped.
+    """
+    ensure_db_exists()
+    inspector = inspect(engine)
+    if 'members_collection' not in inspector.get_table_names():
+        return {'ok': False, 'message': 'members_collection table not found', 'updated': 0}
+
+    try:
+        ensure_members_collection_schema()
+    except Exception:
+        pass
+
+    updated = 0
+    try:
+        updated = backfill_members_collection_identifiers()
+    except Exception:
+        updated = 0
+
+    try:
+        deduplicate_members_collection_s1()
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_collection_s1_unique ON members_collection(s1)'))
+    except Exception:
+        pass
+
+    return {'ok': True, 'table': 'members_collection', 'updated': int(updated)}
 
 
 def create_uploader(name: str, church_id: Optional[int] = None) -> str:
@@ -728,9 +775,9 @@ def ensure_members_collection_schema():
     existing = {c['name'] for c in inspector.get_columns('members_collection')}
     expected = {}
     # s fields
-    expected['s1'] = 'INTEGER'
+    expected['s1'] = 'TEXT'
     expected['s2'] = 'DATETIME'
-    expected['s3'] = 'NUMERIC'
+    expected['s3'] = 'INTEGER'
     expected['s4'] = 'TEXT'
     expected['s5'] = 'NUMERIC'
     expected['s6'] = 'NUMERIC'
@@ -752,8 +799,6 @@ def ensure_members_collection_schema():
     expected['notes'] = 'TEXT'
     expected['church'] = 'INTEGER'
     missing = [k for k in expected.keys() if k not in existing]
-    if not missing:
-        return
 
     # Add each missing column
     for col in missing:
@@ -774,6 +819,19 @@ def ensure_members_collection_schema():
                 conn.commit()
             except Exception:
                 # some dialects/engines auto-commit
+                pass
+
+    # Ensure existing columns have compatible types for current business rules.
+    # SQLAlchemy metadata updates do not alter existing DB column types automatically.
+    if DB_ENGINE not in ("sqlite", "sqlite3"):
+        with engine.begin() as conn:
+            try:
+                conn.execute(text("ALTER TABLE members_collection ALTER COLUMN s1 TYPE TEXT USING CASE WHEN s1 IS NULL THEN NULL ELSE TRIM(s1::TEXT) END"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text('ALTER TABLE members_collection ALTER COLUMN s3 TYPE INTEGER USING CASE WHEN s3 IS NULL THEN NULL ELSE ROUND(s3)::INTEGER END'))
+            except Exception:
                 pass
 
 

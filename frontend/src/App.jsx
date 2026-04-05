@@ -1,57 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import './styles.css'
 
-// StatusAlert component with copy button for error/warning messages
-function StatusAlert({message, type='info'}){
-  const [copied, setCopied] = useState(false)
-  if(!message) return null
-  const copyToClipboard = ()=>{
-    navigator.clipboard.writeText(message).then(()=>{
-      setCopied(true)
-      setTimeout(()=>setCopied(false), 2000)
-    }).catch(()=>{})
-  }
-  const bgColor = type==='error' ? '#fee' : type==='warning' ? '#fef3cd' : '#e7f3ff'
-  const borderColor = type==='error' ? '#f88' : type==='warning' ? '#ffc107' : '#2196f3'
-  const textColor = type==='error' ? '#922' : type==='warning' ? '#856404' : '#004085'
-  return (
-    <div style={{marginTop:12, padding:10, background:bgColor, border:`1px solid ${borderColor}`, borderRadius:6, color:textColor, fontSize:14, display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'text'}}>
-      <span style={{flex:1, wordBreak:'break-word'}}>{message}</span>
-      <button onClick={copyToClipboard} style={{marginLeft:12, padding:'4px 8px', fontSize:12, whiteSpace:'nowrap', background:'transparent', border:`1px solid ${borderColor}`, color: textColor, borderRadius:4, cursor:'pointer'}}>
-        {copied? '✓ Copied':'Copy'}
-      </button>
-    </div>
-  )
-}
-
-// ErrorList component with copy button for validation errors
-function ErrorList({errors, title='Errors'}){
-  const [copied, setCopied] = useState(false)
-  if(!errors || !errors.length) return <div style={{marginTop:8}}>No errors</div>
-  
-  const errorText = errors.join('\n')
-  const copyToClipboard = ()=>{
-    navigator.clipboard.writeText(errorText).then(()=>{
-      setCopied(true)
-      setTimeout(()=>setCopied(false), 2000)
-    }).catch(()=>{})
-  }
-  
-  return (
-    <div style={{marginTop:8, background:'#fee', border:'1px solid #f88', borderRadius:6, padding:10}}>
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
-        <strong style={{color:'#922'}}>{title} ({errors.length})</strong>
-        <button onClick={copyToClipboard} style={{padding:'4px 8px', fontSize:12, background:'transparent', border:'1px solid #f88', color:'#922', borderRadius:4, cursor:'pointer'}}>
-          {copied? '✓ Copied':'Copy all'}
-        </button>
-      </div>
-      <ul style={{margin:'0 0 0 20px', padding:0, color:'#922', userSelect:'text'}}>
-        {errors.map((e, i)=> <li key={i} style={{marginBottom:6, wordBreak:'break-word'}}>{e}</li>)}
-      </ul>
-    </div>
-  )
-}
-
 const LOCAL_API_BASE = 'http://localhost:8000'
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
 
@@ -347,9 +296,10 @@ export default function App(){
   function coerceValue(key, val){
     if(val===null||val===undefined||val==='') return null;
     const sString = new Set(['s4','s10','s11','s12','source','collection_code','notes']);
-    const sNumeric = new Set(['s1','s3','s5','s6','s7','s8','s9','s13']);
+    const sNumeric = new Set(['s3','s5','s6','s7','s8','s9','s13']);
     const sval = String(val).trim();
     if(key==='s2'){ const d=new Date(sval); if(!isNaN(d)) return d.toISOString(); return sval }
+    if(key==='s1') return sval;
     if(sString.has(key)) return sval;
     if(sNumeric.has(key) || key.startsWith('c') || key.startsWith('l')){ const n=Number(sval.replace(/[^0-9.\-]/g,'')); return isNaN(n)? null: n }
     return typeof val==='number' ? val : sval;
@@ -371,7 +321,7 @@ export default function App(){
         else if(s2val instanceof Date) s2dt=s2val;
         const s3val = out.s3; const s3int = s3val!=null? Number(s3val) : null;
         const church_id = out.church || selectedChurch || null;
-        if(s2dt && s3int!=null && !out.s1){ const ymd = s2dt.toISOString().slice(0,10).replace(/-/g,''); const cidn = String(church_id||'').padStart(3,'0'); const s3n = String(Number(s3int)).padStart(3,'0'); out.s1 = parseInt(`${ymd}${cidn}${s3n}`,10) }
+        if(s2dt && s3int!=null && !out.s1){ const ymd = s2dt.toISOString().slice(0,10).replace(/-/g,''); const cidn = String(church_id||'').padStart(3,'0'); const s3n = String(Number(s3int)).padStart(3,'0'); out.s1 = `${ymd}${cidn}${s3n}` }
       }catch(e){}
       return out
     })
@@ -438,7 +388,6 @@ export default function App(){
 
   // If not authenticated, show a focused login screen (no menu)
   if(!user){
-    const statusType = status.toLowerCase().includes('fail') || status.toLowerCase().includes('error') ? 'error' : status.toLowerCase().includes('success') || status.toLowerCase().includes('logged') ? 'info' : 'info'
     return (
       <div style={{fontFamily:'Arial',padding:18}}>
         <h2>Church Offerings — Login</h2>
@@ -446,7 +395,7 @@ export default function App(){
           <input placeholder='username' value={loginUser} onChange={e=>setLoginUser(e.target.value)} />
           <input placeholder='password' type='password' value={loginPass} onChange={e=>setLoginPass(e.target.value)} />
           <button onClick={doLogin}>Login</button>
-          {status && <StatusAlert message={status} type={statusType} />}
+          <div style={{marginTop:8,color:'#666'}}>{status}</div>
         </div>
       </div>
     )
@@ -464,13 +413,13 @@ export default function App(){
         </div>
       </header>
 
-      <nav style={{marginTop:12, marginBottom:12, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+      <nav style={{marginTop:12, marginBottom:12}}>
         <button onClick={()=>setPage('collections')}>Collections</button>
         <button onClick={()=>setPage('members')}>Members</button>
         <button onClick={()=>setPage('members_collections')}>Members Collections</button>
         <button onClick={()=>setPage('reports')}>Reports</button>
         {isAdmin() && <button onClick={()=>{ setPage('admin'); fetchUsers() }}>Admin</button>}
-        {status && <StatusAlert message={status} type={status.toLowerCase().includes('fail') || status.toLowerCase().includes('error') ? 'error' : 'info'} />}
+        <span style={{marginLeft:12,color:'#666'}}>{status}</span>
       </nav>
 
       <main style={{borderTop:'1px solid #eee', paddingTop:12}}>
@@ -731,7 +680,7 @@ export default function App(){
                                   const ymd = s2.toISOString().slice(0,10).replace(/-/g,'')
                                   const cidn = String(Number(churchId)).padStart(3,'0')
                                   const s3n = String(Number(s3)).padStart(3,'0')
-                                  next.s1 = Number(`${ymd}${cidn}${s3n}`)
+                                  next.s1 = `${ymd}${cidn}${s3n}`
                                 }
                               }catch(e){}
                               return next
@@ -915,6 +864,8 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   const [apiKeyStatus, setApiKeyStatus] = useState('')
   const [mappedPreview, setMappedPreview] = useState([])
   const [validationErrors, setValidationErrors] = useState([])
+  const [promptState, setPromptState] = useState({ open: false, level: 'info', message: '' })
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
 
   // total steps (1=file/date/church, 2=mapping, 3=preview/edit, 4=fix, 5=done)
   const totalSteps = 5
@@ -922,7 +873,23 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   useEffect(()=>{ fetchCodes() }, [])
   useEffect(()=>{ if(user && !uploaderName) setUploaderName(user.username) }, [user])
 
-  function coerceValue(key, val){ if(val===null||val===undefined||val==='') return null; if(typeof val==='number') return val; const sval = String(val).trim(); if(key==='s2'){ const d=new Date(sval); if(!isNaN(d)) return d.toISOString(); return sval } if(key==='s1'){ const n=parseInt(sval.replace(/[^0-9-]/g,''),10); return isNaN(n)? null: n } const sNumeric = new Set(['s3','s5','s6','s7','s8','s9','s13']); if(sNumeric.has(key) || key.startsWith('c') || key.startsWith('l')){ const n=Number(sval.replace(/[^0-9.\-]/g,'')); return isNaN(n)? null: n } return sval }
+  function showPrompt(level, message){
+    setCopiedPrompt(false)
+    setPromptState({ open: true, level: level || 'info', message: String(message || '') })
+  }
+
+  async function copyPromptMessage(){
+    try{
+      if(promptState && promptState.message){
+        await navigator.clipboard.writeText(promptState.message)
+        setCopiedPrompt(true)
+      }
+    }catch(e){
+      setCopiedPrompt(false)
+    }
+  }
+
+  function coerceValue(key, val){ if(val===null||val===undefined||val==='') return null; if(typeof val==='number' && key!=='s1') return val; const sval = String(val).trim(); if(key==='s2'){ const d=new Date(sval); if(!isNaN(d)) return d.toISOString(); return sval } if(key==='s1'){ return sval } const sNumeric = new Set(['s3','s5','s6','s7','s8','s9','s13']); if(sNumeric.has(key) || key.startsWith('c') || key.startsWith('l')){ const n=Number(sval.replace(/[^0-9.\-]/g,'')); return isNaN(n)? null: n } return sval }
 
   async function uploadFile(){
     if(!file) return;
@@ -958,7 +925,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       // compute mapped preview immediately using the rows returned by the server
       recomputeMappedPreview(m, initialPreview);
       setStep(2)
-    }catch(e){ alert('Upload failed: '+e.message) }
+    }catch(e){ showPrompt('error', 'Upload failed: ' + (e && e.message ? e.message : String(e))) }
   }
 
   function recomputeMappedPreview(mappingToUse = mapping, rowsSource = null){
@@ -978,7 +945,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         else if(s2val instanceof Date) s2dt=s2val;
         const s3val = out.s3; const s3int = s3val!=null? Number(s3val) : null;
         const church_id = out.church || selectedChurch || null;
-        if(s2dt && s3int!=null && !out.s1){ const ymd = s2dt.toISOString().slice(0,10).replace(/-/g,''); const cidn = String(church_id||'').padStart(3,'0'); const s3n = String(Number(s3int)).padStart(3,'0'); out.s1 = parseInt(`${ymd}${cidn}${s3n}`,10) }
+        if(s2dt && s3int!=null && !out.s1){ const ymd = s2dt.toISOString().slice(0,10).replace(/-/g,''); const cidn = String(church_id||'').padStart(3,'0'); const s3n = String(Number(s3int)).padStart(3,'0'); out.s1 = `${ymd}${cidn}${s3n}` }
         // If s3 missing but s1 is a combined serial, try to extract s3 and church from s1
         if((out.s3===null || out.s3===undefined) && out.s1){
           try{
@@ -1045,10 +1012,23 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
 
   async function validateRows(rows){ try{ const headers = {'Content-Type':'application/json'}; const res = await authFetch('http://localhost:8000/members_collections/validate',{method:'POST', headers, body: JSON.stringify(rows)}); const data = await res.json(); if(!res.ok){ if(res.status===422 && data && data.detail && data.detail.validation_errors){ if(data.detail.rows) setMappedPreview(data.detail.rows); return data.detail.validation_errors || [] } throw new Error(data.detail||JSON.stringify(data)) } if(data.rows) setMappedPreview(data.rows); return data.validation_errors || [] }catch(err){ return [{error: err.message}] } }
 
-  async function submitMapped(){ const rows = mappedPreview.length? mappedPreview : recomputeMappedPreview(); const val = await validateRows(rows); if(val && val.length){ setValidationErrors(val); setStep(4); alert('Validation errors present'); return } try{ const headers = {'Content-Type':'application/json'}; const res = await authFetch('http://localhost:8000/members_collections/bulk',{method:'POST', headers, body: JSON.stringify(rows)}); const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data)); alert(`Inserted ${data.inserted} rows`); setStep(5) }catch(e){ alert('Submit failed: '+e.message) } }
+  async function submitMapped(){ const rows = mappedPreview.length? mappedPreview : recomputeMappedPreview(); const val = await validateRows(rows); if(val && val.length){ setValidationErrors(val); setStep(4); showPrompt('warning', 'Validation errors present. Open Step 4 to review details.'); return } try{ const headers = {'Content-Type':'application/json'}; const res = await authFetch('http://localhost:8000/members_collections/bulk',{method:'POST', headers, body: JSON.stringify(rows)}); const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data)); showPrompt('success', `Inserted ${data.inserted} rows`); setStep(5) }catch(e){ showPrompt('error', 'Submit failed: ' + (e && e.message ? e.message : String(e))) } }
 
   return (
     <div>
+      {promptState.open && (
+        <div style={{marginBottom:10, border:'1px solid #d0d7de', borderLeft:`5px solid ${promptState.level==='error' ? '#d1242f' : promptState.level==='warning' ? '#d97706' : promptState.level==='success' ? '#2f7d32' : '#2563eb'}`, background:'#f8fafc', padding:10, borderRadius:6}}>
+          <div style={{display:'flex', justifyContent:'space-between', gap:8, alignItems:'center', marginBottom:8}}>
+            <strong>{promptState.level==='error' ? 'Error' : promptState.level==='warning' ? 'Warning' : promptState.level==='success' ? 'Success' : 'Info'}</strong>
+            <div style={{display:'flex', gap:8}}>
+              <button onClick={copyPromptMessage}>Copy message</button>
+              <button onClick={()=> setPromptState(prev=> ({...prev, open:false}))}>Close</button>
+            </div>
+          </div>
+          <textarea readOnly value={promptState.message} style={{width:'100%', minHeight:90, fontFamily:'Consolas, monospace', fontSize:13, padding:8, border:'1px solid #cbd5e1', borderRadius:4, background:'#ffffff'}} />
+          {copiedPrompt && <div style={{marginTop:6, color:'#2f7d32'}}>Message copied to clipboard.</div>}
+        </div>
+      )}
       <div style={{marginBottom:8,color:'#333'}}>Step {step} of {totalSteps}</div>
       {step===1 && (
         <div>
@@ -1106,8 +1086,8 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
                     try{
                       const res = await authFetch('http://localhost:8000/header_mappings',{method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(arr)});
                       const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data));
-                      alert('Mappings saved');
-                    }catch(e){ alert('Save mapping failed: '+e.message) }
+                      showPrompt('success', 'Mappings saved');
+                    }catch(e){ showPrompt('error', 'Save mapping failed: ' + (e && e.message ? e.message : String(e))) }
                 }} style={{marginLeft:8}}>Save mapping</button>
               </div>
         </div>
@@ -1135,11 +1115,13 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         <div>
           <h4>Fix validation errors</h4>
           {validationErrors && validationErrors.length ? (
-            <ErrorList errors={formatValidationErrors(validationErrors)} title='Validation Errors' />
+            <ul>
+              {formatValidationErrors(validationErrors).map((m,i)=> <li key={i}>{m}</li>)}
+            </ul>
           ) : (
             <div>No validation errors</div>
           )}
-          <button onClick={()=>setStep(3)} style={{marginTop:12}}>Back to preview</button>
+          <button onClick={()=>setStep(3)}>Back to preview</button>
         </div>
       )}
 

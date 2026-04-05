@@ -358,7 +358,7 @@ def update_members_collection(row_id: int, payload: dict):
                 church_val = update_cols.get('church', cur[2])
                 s1_val = compute_members_collection_s1(s2_val, church_val, s3_val)
                 if s1_val is not None:
-                    update_cols['s1'] = int(s1_val)
+                    update_cols['s1'] = str(s1_val)
 
         set_parts = ', '.join([f"{c}=:{c}" for c in update_cols.keys()])
         params = dict(update_cols)
@@ -475,7 +475,7 @@ class MembersCollectionRow(BaseModel):
     collection_code: Optional[str] = None
     member_id: Optional[int] = None
     # s1/s3 can be auto-generated from s2 + church daily sequence.
-    s1: Optional[int] = None
+    s1: Optional[str] = None
     s2: datetime
     s3: Optional[int] = None
     s4: str
