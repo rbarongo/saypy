@@ -624,6 +624,19 @@ def _hash_password(password: str, salt: bytes) -> str:
     return binascii.hexlify(dk).decode('ascii')
 
 
+def password_policy_error(password: str) -> Optional[str]:
+    p = str(password or '')
+    if len(p) < 8:
+        return 'Password must be at least 8 characters long'
+    if not any(ch.isalpha() for ch in p):
+        return 'Password must include at least one letter'
+    if not any(ch.isdigit() for ch in p):
+        return 'Password must include at least one number'
+    if not any(not ch.isalnum() for ch in p):
+        return 'Password must include at least one special character'
+    return None
+
+
 def create_user(username: str, password: str, church_id: Optional[int] = None, role: str = 'uploader') -> dict:
     ensure_db_exists()
     uname = str(username or '').strip().lower()
@@ -631,6 +644,9 @@ def create_user(username: str, password: str, church_id: Optional[int] = None, r
         church_id = None
     elif church_id is None:
         raise ValueError('User church is required for all users except saypy_admin')
+    policy_msg = password_policy_error(password)
+    if policy_msg:
+        raise ValueError(policy_msg)
     salt = os.urandom(16)
     ph = _hash_password(password, salt)
     salt_hex = binascii.hexlify(salt).decode('ascii')

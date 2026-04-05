@@ -38,6 +38,16 @@ export default function App(){
   function denyRestrictedChurchAccess(context){
     setStatus(`Restricted information: you cannot access ${context} for another church`)
   }
+
+  function passwordPolicyMessage(password){
+    const p = String(password || '')
+    if(p.length < 8) return 'Password must be at least 8 characters long'
+    if(!/[A-Za-z]/.test(p)) return 'Password must include at least one letter'
+    if(!/[0-9]/.test(p)) return 'Password must include at least one number'
+    if(!/[^A-Za-z0-9]/.test(p)) return 'Password must include at least one special character'
+    return ''
+  }
+  const PASSWORD_HINT = 'Password: minimum 8 characters, include at least 1 letter, 1 number, and 1 special character.'
   function roleLabel(role){
     const map = {
       system_admin: 'System Admin',
@@ -104,6 +114,10 @@ export default function App(){
   const [userEditForm, setUserEditForm] = useState({ username:'', role:'uploader', church:'' })
   const [resetUser, setResetUser] = useState(null)
   const [resetPassword, setResetPassword] = useState('')
+  const [showOwnPasswordForm, setShowOwnPasswordForm] = useState(false)
+  const [ownCurrentPassword, setOwnCurrentPassword] = useState('')
+  const [ownNewPassword, setOwnNewPassword] = useState('')
+  const [ownConfirmPassword, setOwnConfirmPassword] = useState('')
   async function fetchUsers(){
     try{
       const res = await fetch('http://localhost:8000/users', { headers: authHeaders() })
@@ -122,6 +136,8 @@ export default function App(){
   async function createUser(username, password, church, role){
     try{
       if(!canAccessChurch(church)){ denyRestrictedChurchAccess('user creation'); return }
+      const policyMsg = passwordPolicyMessage(password)
+      if(policyMsg){ setStatus('Create user failed: ' + policyMsg); return }
       const body = { username, password, church, role }
       const res = await fetch('http://localhost:8000/users/register', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) })
       const data = await res.json()
@@ -163,8 +179,9 @@ export default function App(){
   async function submitResetPassword(){
     if(!resetUser) return
     try{
-      if(!resetPassword || resetPassword.trim().length < 4){
-        setStatus('Password reset failed: password must be at least 4 characters')
+      const policyMsg = passwordPolicyMessage(resetPassword)
+      if(policyMsg){
+        setStatus('Password reset failed: ' + policyMsg)
         return
       }
       if(!canAccessChurch(resetUser.church)){ denyRestrictedChurchAccess('password reset'); return }
@@ -186,6 +203,38 @@ export default function App(){
       setResetPassword('')
       await fetchUsers()
     }catch(e){ setStatus('Password reset failed: ' + e.message) }
+  }
+
+  async function submitOwnPasswordReset(){
+    try{
+      if(!ownCurrentPassword || !ownNewPassword){
+        setStatus('Password change failed: current and new password are required')
+        return
+      }
+      const policyMsg = passwordPolicyMessage(ownNewPassword)
+      if(policyMsg){
+        setStatus('Password change failed: ' + policyMsg)
+        return
+      }
+      if(ownNewPassword !== ownConfirmPassword){
+        setStatus('Password change failed: password confirmation does not match')
+        return
+      }
+      const res = await fetch('http://localhost:8000/users/me/reset-password', {
+        method:'POST',
+        headers: authHeaders({'Content-Type':'application/json'}),
+        body: JSON.stringify({ current_password: ownCurrentPassword, new_password: ownNewPassword })
+      })
+      const data = await res.json().catch(()=> ({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data) || `HTTP ${res.status}`)
+      setStatus('Password changed successfully')
+      setShowOwnPasswordForm(false)
+      setOwnCurrentPassword('')
+      setOwnNewPassword('')
+      setOwnConfirmPassword('')
+    }catch(e){
+      setStatus('Password change failed: ' + e.message)
+    }
   }
 
   // ----- Members (list + update) -----
@@ -512,10 +561,24 @@ export default function App(){
         <div>
           <div>
             <strong>{user.username}</strong> ({user.role})
+            <button style={{marginLeft:8}} onClick={()=> setShowOwnPasswordForm(s=>!s)}>{showOwnPasswordForm ? 'Cancel Password Change' : 'Change Password'}</button>
             <button style={{marginLeft:8}} onClick={logout}>Logout</button>
           </div>
         </div>
       </header>
+
+      {showOwnPasswordForm && (
+        <div style={{marginTop:10,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+          <h4 style={{marginTop:0}}>Change My Password</h4>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <input type='password' placeholder='Current password' value={ownCurrentPassword} onChange={e=>setOwnCurrentPassword(e.target.value)} />
+            <input type='password' placeholder='New password' value={ownNewPassword} onChange={e=>setOwnNewPassword(e.target.value)} />
+            <input type='password' placeholder='Confirm new password' value={ownConfirmPassword} onChange={e=>setOwnConfirmPassword(e.target.value)} />
+            <button onClick={submitOwnPasswordReset}>Update Password</button>
+          </div>
+          <div style={{marginTop:6,fontSize:12,color:'#666'}}>{PASSWORD_HINT}</div>
+        </div>
+      )}
 
       <nav style={{marginTop:12, marginBottom:12}}>
         <button onClick={()=>setPage('collections')}>Collections</button>
@@ -591,6 +654,7 @@ export default function App(){
                     <button onClick={submitResetPassword}>Set New Password</button>
                     <button onClick={()=>{ setResetUser(null); setResetPassword('') }}>Cancel</button>
                   </div>
+                  <div style={{marginTop:6,fontSize:12,color:'#666'}}>{PASSWORD_HINT}</div>
                 </div>
               )}
             </div>
@@ -990,30 +1054,34 @@ function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, on
   const [p, setP] = useState('')
   const [c, setC] = useState(churches[0]?.id || null)
   const [r, setR] = useState((roleOptions && roleOptions.length ? roleOptions[0] : 'uploader'))
+  const passwordHint = 'Password: minimum 8 characters, include at least 1 letter, 1 number, and 1 special character.'
   useEffect(()=>{
     if(scopedChurchId !== null && scopedChurchId !== undefined && !Number.isNaN(Number(scopedChurchId))){
       setC(String(scopedChurchId))
     }
   }, [scopedChurchId])
   return (
-    <div style={{display:'flex', gap:8, alignItems:'center'}}>
-      <input placeholder='username' value={u} onChange={e=>setU(e.target.value)} />
-      <input placeholder='password' value={p} onChange={e=>setP(e.target.value)} />
-      <select value={c||''} onChange={e=>{
-        const val = e.target.value
-        if(typeof canAccessChurch === 'function' && !canAccessChurch(val)){
-          if(typeof onRestrictedChurchAttempt === 'function') onRestrictedChurchAttempt('user creation')
-          return
-        }
-        setC(val)
-      }}>
-        <option value=''>-- church --</option>
-        {churches.map(ch=> <option key={ch.id} value={ch.id} disabled={typeof canAccessChurch === 'function' ? !canAccessChurch(ch.id) : false}>{ch.name}</option>)}
-      </select>
-      <select value={r} onChange={e=>setR(e.target.value)}>
-        {(roleOptions && roleOptions.length ? roleOptions : ['uploader']).map(opt => <option key={opt} value={opt}>{roleLabel(opt)}</option>)}
-      </select>
-      <button onClick={()=> onCreate(u,p,c,r)}>Create</button>
+    <div>
+      <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+        <input placeholder='username' value={u} onChange={e=>setU(e.target.value)} />
+        <input placeholder='password' value={p} onChange={e=>setP(e.target.value)} />
+        <select value={c||''} onChange={e=>{
+          const val = e.target.value
+          if(typeof canAccessChurch === 'function' && !canAccessChurch(val)){
+            if(typeof onRestrictedChurchAttempt === 'function') onRestrictedChurchAttempt('user creation')
+            return
+          }
+          setC(val)
+        }}>
+          <option value=''>-- church --</option>
+          {churches.map(ch=> <option key={ch.id} value={ch.id} disabled={typeof canAccessChurch === 'function' ? !canAccessChurch(ch.id) : false}>{ch.name}</option>)}
+        </select>
+        <select value={r} onChange={e=>setR(e.target.value)}>
+          {(roleOptions && roleOptions.length ? roleOptions : ['uploader']).map(opt => <option key={opt} value={opt}>{roleLabel(opt)}</option>)}
+        </select>
+        <button onClick={()=> onCreate(u,p,c,r)}>Create</button>
+      </div>
+      <div style={{marginTop:6,fontSize:12,color:'#666'}}>{passwordHint}</div>
     </div>
   )
 }

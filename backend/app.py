@@ -1,6 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import binascii
 import pandas as pd
 from .db import (
     get_target_columns,
@@ -17,6 +19,8 @@ from .db import (
     list_uploaders,
     create_user,
     verify_user,
+    _hash_password,
+    password_policy_error,
     create_token_for_user,
     get_user_by_token,
     normalize_members_collection_rows,
@@ -819,6 +823,11 @@ class UserRegister(BaseModel):
     role: Optional[str] = None
 
 
+class SelfPasswordResetIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
 @app.post('/users/register')
 def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     try:
@@ -850,6 +859,8 @@ def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentia
         return out
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -862,6 +873,43 @@ def login_user(payload: UserIn):
     u = _normalize_user_context(u)
     token = create_token_for_user(u['id'])
     return {"token": token, "user": u}
+
+
+@app.post('/users/me/reset-password')
+def reset_own_password(payload: SelfPasswordResetIn, current_user: dict = Depends(get_current_user)):
+    try:
+        username = str(current_user.get('username') or '').strip()
+        user_id = current_user.get('id')
+        if not username or user_id is None:
+            raise HTTPException(status_code=401, detail='Invalid user session')
+
+        current_password = str(payload.current_password or '')
+        new_password = str(payload.new_password or '')
+        policy_msg = password_policy_error(new_password)
+        if policy_msg:
+            raise HTTPException(status_code=400, detail=policy_msg)
+        if current_password == new_password:
+            raise HTTPException(status_code=400, detail='New password must be different from current password')
+
+        verified = verify_user(username, current_password)
+        if not verified:
+            raise HTTPException(status_code=401, detail='Current password is incorrect')
+
+        salt = os.urandom(16)
+        ph = _hash_password(new_password, salt)
+        salt_hex = binascii.hexlify(salt).decode('ascii')
+
+        with engine.begin() as conn:
+            conn.execute(
+                text('UPDATE users SET password_hash=:ph, salt=:s WHERE id=:id'),
+                {'ph': ph, 's': salt_hex, 'id': int(user_id)}
+            )
+
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get('/users')
@@ -910,6 +958,9 @@ def update_user(user_id: int, payload: UserRegister, current_user: dict = Depend
                     raise HTTPException(status_code=404, detail='user not found')
                 _enforce_church_scope(existing[0], current_church, context='this user record')
             if payload.password:
+                policy_msg = password_policy_error(payload.password)
+                if policy_msg:
+                    raise HTTPException(status_code=400, detail=policy_msg)
                 # create new salt/hash
                 salt = os.urandom(16)
                 ph = _hash_password(payload.password, salt)
