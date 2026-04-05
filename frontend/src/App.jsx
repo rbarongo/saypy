@@ -5,7 +5,8 @@ const LOCAL_API_BASE = 'http://localhost:8000'
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
 
 function rewriteApiUrl(input){
-  const base = API_BASE || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000` : LOCAL_API_BASE)
+  // Default to HTTP for API calls; backend commonly runs on plain HTTP:8000.
+  const base = API_BASE || (typeof window !== 'undefined' ? `http://${window.location.hostname}:8000` : LOCAL_API_BASE)
   if(typeof input === 'string' && input.startsWith(LOCAL_API_BASE)){
     return `${base}${input.slice(LOCAL_API_BASE.length)}`
   }
