@@ -81,6 +81,10 @@ export default function App(){
 
   // ----- Admin: users -----
   const [usersList, setUsersList] = useState([])
+  const [editingUser, setEditingUser] = useState(null)
+  const [userEditForm, setUserEditForm] = useState({ username:'', role:'uploader', church:'' })
+  const [resetUser, setResetUser] = useState(null)
+  const [resetPassword, setResetPassword] = useState('')
   async function fetchUsers(){
     try{
       const res = await fetch('http://localhost:8000/users', { headers: authHeaders() })
@@ -91,6 +95,7 @@ export default function App(){
   }
   async function createUser(username, password, church, role){
     try{
+      if(!canAccessChurch(church)){ denyRestrictedChurchAccess('user creation'); return }
       const body = { username, password, church, role }
       const res = await fetch('http://localhost:8000/users/register', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) })
       const data = await res.json()
@@ -98,6 +103,63 @@ export default function App(){
       setStatus('User created')
       await fetchUsers()
     }catch(e){ setStatus('Create user failed: '+e.message) }
+  }
+
+  function beginEditUser(u){
+    if(!u) return
+    setEditingUser(u)
+    setUserEditForm({ username: u.username || '', role: u.role || 'uploader', church: u.church ?? '' })
+  }
+
+  async function saveUserEdit(){
+    if(!editingUser) return
+    try{
+      if(!canAccessChurch(userEditForm.church)){ denyRestrictedChurchAccess('user update'); return }
+      const payload = {
+        username: userEditForm.username,
+        church: userEditForm.church === '' ? null : Number(userEditForm.church),
+        role: userEditForm.role || 'uploader',
+        password: ''
+      }
+      const res = await fetch(`http://localhost:8000/users/${editingUser.id}`, {
+        method:'PUT',
+        headers: authHeaders({'Content-Type':'application/json'}),
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json()
+      if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
+      setStatus('User updated')
+      setEditingUser(null)
+      await fetchUsers()
+    }catch(e){ setStatus('Update user failed: ' + e.message) }
+  }
+
+  async function submitResetPassword(){
+    if(!resetUser) return
+    try{
+      if(!resetPassword || resetPassword.trim().length < 4){
+        setStatus('Password reset failed: password must be at least 4 characters')
+        return
+      }
+      if(!canAccessChurch(resetUser.church)){ denyRestrictedChurchAccess('password reset'); return }
+      const payload = {
+        username: resetUser.username,
+        church: resetUser.church ?? null,
+        role: resetUser.role || 'uploader',
+        password: resetPassword
+      }
+      const res = await fetch(`http://localhost:8000/users/${resetUser.id}`, {
+        method:'PUT',
+        headers: authHeaders({'Content-Type':'application/json'}),
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json()
+      if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
+      setStatus(`Password reset for ${resetUser.username}`)
+      setResetUser(null)
+      setResetPassword('')
+      await fetchUsers()
+    }catch(e){ setStatus('Password reset failed: ' + e.message) }
   }
 
   // ----- Members (list + update) -----
@@ -442,16 +504,64 @@ export default function App(){
             </div>
             <div>
               <h4>Create user</h4>
-              <CreateUserForm onCreate={(u,p,c,r)=> createUser(u,p,c,r)} churches={churches} />
+              <CreateUserForm onCreate={(u,p,c,r)=> createUser(u,p,c,r)} churches={churches} scopedChurchId={currentUserChurchId} canAccessChurch={canAccessChurch} onRestrictedChurchAttempt={denyRestrictedChurchAccess} />
             </div>
             <div style={{marginTop:12}}>
               <h4>Users</h4>
               <table border={1} cellPadding={6} style={{borderCollapse:'collapse'}}>
-                <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Church</th></tr></thead>
+                <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Church</th><th>Actions</th></tr></thead>
                 <tbody>
-                  {usersList.map(u=> <tr key={u.id}><td>{u.id}</td><td>{u.username}</td><td>{u.role}</td><td>{u.church}</td></tr>)}
+                  {usersList.map(u=> {
+                    const chName = (churches||[]).find(c=> Number(c.id)===Number(u.church))?.name || u.church
+                    return (
+                      <tr key={u.id}>
+                        <td>{u.id}</td>
+                        <td>{u.username}</td>
+                        <td>{u.role}</td>
+                        <td>{chName}</td>
+                        <td>
+                          <button onClick={()=>beginEditUser(u)}>Edit</button>
+                          <button style={{marginLeft:8}} onClick={()=>{ setResetUser(u); setResetPassword('') }}>Reset Password</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
+
+              {editingUser && (
+                <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+                  <h4>Edit User: {editingUser.username}</h4>
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <input value={userEditForm.username} placeholder='username' onChange={e=>setUserEditForm(prev=>({...prev, username:e.target.value}))} />
+                    <select value={userEditForm.role} onChange={e=>setUserEditForm(prev=>({...prev, role:e.target.value}))}>
+                      <option value='uploader'>uploader</option>
+                      <option value='admin'>admin</option>
+                    </select>
+                    <select value={userEditForm.church ?? ''} onChange={e=>{
+                      const v = e.target.value
+                      if(!canAccessChurch(v)){ denyRestrictedChurchAccess('user management'); return }
+                      setUserEditForm(prev=>({...prev, church:v}))
+                    }}>
+                      <option value=''>-- church --</option>
+                      {(churches||[]).map(ch=> <option key={ch.id} value={ch.id} disabled={!canAccessChurch(ch.id)}>{ch.name}</option>)}
+                    </select>
+                    <button onClick={saveUserEdit}>Save</button>
+                    <button onClick={()=>setEditingUser(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {resetUser && (
+                <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+                  <h4>Reset Password: {resetUser.username}</h4>
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <input type='password' placeholder='new password' value={resetPassword} onChange={e=>setResetPassword(e.target.value)} />
+                    <button onClick={submitResetPassword}>Set New Password</button>
+                    <button onClick={()=>{ setResetUser(null); setResetPassword('') }}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -844,18 +954,30 @@ export default function App(){
 }
 
 // ----- Subcomponents -----
-function CreateUserForm({onCreate, churches}){
+function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, onRestrictedChurchAttempt}){
   const [u, setU] = useState('')
   const [p, setP] = useState('')
   const [c, setC] = useState(churches[0]?.id || null)
   const [r, setR] = useState('uploader')
+  useEffect(()=>{
+    if(scopedChurchId !== null && scopedChurchId !== undefined && !Number.isNaN(Number(scopedChurchId))){
+      setC(String(scopedChurchId))
+    }
+  }, [scopedChurchId])
   return (
     <div style={{display:'flex', gap:8, alignItems:'center'}}>
       <input placeholder='username' value={u} onChange={e=>setU(e.target.value)} />
       <input placeholder='password' value={p} onChange={e=>setP(e.target.value)} />
-      <select value={c||''} onChange={e=>setC(e.target.value)}>
+      <select value={c||''} onChange={e=>{
+        const val = e.target.value
+        if(typeof canAccessChurch === 'function' && !canAccessChurch(val)){
+          if(typeof onRestrictedChurchAttempt === 'function') onRestrictedChurchAttempt('user creation')
+          return
+        }
+        setC(val)
+      }}>
         <option value=''>-- church --</option>
-        {churches.map(ch=> <option key={ch.id} value={ch.id}>{ch.name}</option>)}
+        {churches.map(ch=> <option key={ch.id} value={ch.id} disabled={typeof canAccessChurch === 'function' ? !canAccessChurch(ch.id) : false}>{ch.name}</option>)}
       </select>
       <select value={r} onChange={e=>setR(e.target.value)}>
         <option value='uploader'>uploader</option>
