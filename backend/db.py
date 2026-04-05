@@ -453,6 +453,11 @@ users = Table(
     'users', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
     Column('username', String(150), nullable=False, unique=True),
+    Column('first_name', String(120), nullable=True),
+    Column('middle_name', String(120), nullable=True),
+    Column('last_name', String(120), nullable=True),
+    Column('email', String(320), nullable=True),
+    Column('phone', String(60), nullable=True),
     Column('password_hash', String(128), nullable=False),
     Column('salt', String(64), nullable=False),
     Column('church', Integer, ForeignKey('church.id'), nullable=True),
@@ -484,6 +489,10 @@ def create_tables():
 
     # Create dependent table after uniqueness constraints exist.
     metadata.create_all(engine, tables=[members_collection])
+    try:
+        ensure_users_schema()
+    except Exception:
+        pass
     # Ensure any new columns are present on existing tables (simple ALTER TABLE add column migration)
     try:
         ensure_members_collection_schema()
@@ -563,6 +572,30 @@ def migrate_members_collection_only() -> dict:
     return {'ok': True, 'table': 'members_collection', 'updated': int(updated)}
 
 
+def ensure_users_schema():
+    """Ensure users table has expected profile columns."""
+    inspector = inspect(engine)
+    if 'users' not in inspector.get_table_names():
+        return
+    existing = {c['name'] for c in inspector.get_columns('users')}
+    expected = {
+        'first_name': 'TEXT',
+        'middle_name': 'TEXT',
+        'last_name': 'TEXT',
+        'email': 'TEXT',
+        'phone': 'TEXT',
+    }
+    missing = [k for k in expected.keys() if k not in existing]
+    for col in missing:
+        stmt = f'ALTER TABLE users ADD COLUMN {col} {expected[col]}'
+        with engine.connect() as conn:
+            conn.execute(text(stmt))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+
 def create_uploader(name: str, church_id: Optional[int] = None) -> str:
     """Create an uploader record and return an api_key."""
     ensure_db_exists()
@@ -637,7 +670,17 @@ def password_policy_error(password: str) -> Optional[str]:
     return None
 
 
-def create_user(username: str, password: str, church_id: Optional[int] = None, role: str = 'uploader') -> dict:
+def create_user(
+    username: str,
+    password: str,
+    church_id: Optional[int] = None,
+    role: str = 'uploader',
+    first_name: Optional[str] = None,
+    middle_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> dict:
     ensure_db_exists()
     uname = str(username or '').strip().lower()
     if uname == 'saypy_admin':
@@ -652,14 +695,35 @@ def create_user(username: str, password: str, church_id: Optional[int] = None, r
     salt_hex = binascii.hexlify(salt).decode('ascii')
     # Atomic write: commit on success, rollback on failure.
     with engine.begin() as conn:
-        conn.execute(sql_insert(users).values(username=username, password_hash=ph, salt=salt_hex, church=church_id, role=role))
+        conn.execute(sql_insert(users).values(
+            username=username,
+            first_name=first_name,
+            middle_name=middle_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+            password_hash=ph,
+            salt=salt_hex,
+            church=church_id,
+            role=role,
+        ))
 
     with engine.connect() as conn:
-        res = conn.execute(text('SELECT id, username, church, role FROM users WHERE username=:u'), {'u': username})
+        res = conn.execute(text('SELECT id, username, first_name, middle_name, last_name, email, phone, church, role FROM users WHERE username=:u'), {'u': username})
         row = res.fetchone()
         if not row:
             raise RuntimeError('Failed to create user')
-        return {'id': row[0], 'username': row[1], 'church': row[2], 'role': row[3]}
+        return {
+            'id': row[0],
+            'username': row[1],
+            'first_name': row[2],
+            'middle_name': row[3],
+            'last_name': row[4],
+            'email': row[5],
+            'phone': row[6],
+            'church': row[7],
+            'role': row[8],
+        }
 
 
 def verify_user(username: str, password: str) -> Optional[dict]:

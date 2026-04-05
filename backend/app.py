@@ -821,6 +821,11 @@ class UserRegister(BaseModel):
     password: str
     church: Optional[int] = None
     role: Optional[str] = None
+    first_name: Optional[str] = None
+    middle_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class SelfPasswordResetIn(BaseModel):
@@ -855,7 +860,17 @@ def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentia
             raise HTTPException(status_code=400, detail='saypy_admin must have church set to null')
         if requested_username != 'saypy_admin' and effective_church is None:
             raise HTTPException(status_code=400, detail='Church is required for all users except saypy_admin')
-        out = create_user(payload.username, payload.password, effective_church, role=role)
+        out = create_user(
+            payload.username,
+            payload.password,
+            effective_church,
+            role=role,
+            first_name=payload.first_name,
+            middle_name=payload.middle_name,
+            last_name=payload.last_name,
+            email=payload.email,
+            phone=payload.phone,
+        )
         return out
     except HTTPException:
         raise
@@ -921,9 +936,9 @@ def list_users(current_user: dict = Depends(get_current_user)):
         current_church = None if _is_system_admin_user(current_user) else _resolve_church_id(current_user.get('church'))
         with engine.connect() as conn:
             if current_church is None:
-                res = conn.execute(text('SELECT id, username, church, role, created_at FROM users'))
+                res = conn.execute(text('SELECT id, username, first_name, middle_name, last_name, email, phone, church, role, created_at FROM users'))
             else:
-                res = conn.execute(text('SELECT id, username, church, role, created_at FROM users WHERE church=:c'), {'c': current_church})
+                res = conn.execute(text('SELECT id, username, first_name, middle_name, last_name, email, phone, church, role, created_at FROM users WHERE church=:c'), {'c': current_church})
             rows = [dict(r._mapping) for r in res.fetchall()]
         return rows
     except Exception as e:
@@ -965,11 +980,11 @@ def update_user(user_id: int, payload: UserRegister, current_user: dict = Depend
                 salt = os.urandom(16)
                 ph = _hash_password(payload.password, salt)
                 salt_hex = binascii.hexlify(salt).decode('ascii')
-                conn.execute(text('UPDATE users SET username=:u, password_hash=:ph, salt=:s, church=:c, role=:r WHERE id=:id'),
-                             {'u': payload.username, 'ph': ph, 's': salt_hex, 'c': effective_church, 'r': next_role, 'id': user_id})
+                conn.execute(text('UPDATE users SET username=:u, first_name=:fn, middle_name=:mn, last_name=:ln, email=:em, phone=:phn, password_hash=:ph, salt=:s, church=:c, role=:r WHERE id=:id'),
+                             {'u': payload.username, 'fn': payload.first_name, 'mn': payload.middle_name, 'ln': payload.last_name, 'em': payload.email, 'phn': payload.phone, 'ph': ph, 's': salt_hex, 'c': effective_church, 'r': next_role, 'id': user_id})
             else:
-                conn.execute(text('UPDATE users SET username=:u, church=:c, role=:r WHERE id=:id'),
-                             {'u': payload.username, 'c': effective_church, 'r': next_role, 'id': user_id})
+                conn.execute(text('UPDATE users SET username=:u, first_name=:fn, middle_name=:mn, last_name=:ln, email=:em, phone=:phn, church=:c, role=:r WHERE id=:id'),
+                             {'u': payload.username, 'fn': payload.first_name, 'mn': payload.middle_name, 'ln': payload.last_name, 'em': payload.email, 'phn': payload.phone, 'c': effective_church, 'r': next_role, 'id': user_id})
             try:
                 conn.commit()
             except Exception:

@@ -111,7 +111,7 @@ export default function App(){
   // ----- Admin: users -----
   const [usersList, setUsersList] = useState([])
   const [editingUser, setEditingUser] = useState(null)
-  const [userEditForm, setUserEditForm] = useState({ username:'', role:'uploader', church:'' })
+  const [userEditForm, setUserEditForm] = useState({ username:'', first_name:'', middle_name:'', last_name:'', email:'', phone:'', role:'uploader', church:'' })
   const [resetUser, setResetUser] = useState(null)
   const [resetPassword, setResetPassword] = useState('')
   const [showOwnPasswordForm, setShowOwnPasswordForm] = useState(false)
@@ -133,12 +133,22 @@ export default function App(){
       setUsersList(data)
     }catch(e){ setStatus('Fetch users failed: '+e.message) }
   }
-  async function createUser(username, password, church, role){
+  async function createUser(username, password, church, role, firstName='', middleName='', lastName='', email='', phone=''){
     try{
       if(!canAccessChurch(church)){ denyRestrictedChurchAccess('user creation'); return }
       const policyMsg = passwordPolicyMessage(password)
       if(policyMsg){ setStatus('Create user failed: ' + policyMsg); return }
-      const body = { username, password, church, role }
+      const body = {
+        username,
+        password,
+        church,
+        role,
+        first_name: firstName || null,
+        middle_name: middleName || null,
+        last_name: lastName || null,
+        email: email || null,
+        phone: phone || null,
+      }
       const res = await fetch('http://localhost:8000/users/register', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) })
       const data = await res.json()
       if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
@@ -150,7 +160,16 @@ export default function App(){
   function beginEditUser(u){
     if(!u) return
     setEditingUser(u)
-    setUserEditForm({ username: u.username || '', role: u.role || 'uploader', church: u.church ?? '' })
+    setUserEditForm({
+      username: u.username || '',
+      first_name: u.first_name || '',
+      middle_name: u.middle_name || '',
+      last_name: u.last_name || '',
+      email: u.email || '',
+      phone: u.phone || '',
+      role: u.role || 'uploader',
+      church: u.church ?? ''
+    })
   }
 
   async function saveUserEdit(){
@@ -159,6 +178,11 @@ export default function App(){
       if(!canAccessChurch(userEditForm.church)){ denyRestrictedChurchAccess('user update'); return }
       const payload = {
         username: userEditForm.username,
+        first_name: userEditForm.first_name || null,
+        middle_name: userEditForm.middle_name || null,
+        last_name: userEditForm.last_name || null,
+        email: userEditForm.email || null,
+        phone: userEditForm.phone || null,
         church: userEditForm.church === '' ? null : Number(userEditForm.church),
         role: userEditForm.role || 'uploader',
         password: ''
@@ -187,6 +211,11 @@ export default function App(){
       if(!canAccessChurch(resetUser.church)){ denyRestrictedChurchAccess('password reset'); return }
       const payload = {
         username: resetUser.username,
+        first_name: resetUser.first_name || null,
+        middle_name: resetUser.middle_name || null,
+        last_name: resetUser.last_name || null,
+        email: resetUser.email || null,
+        phone: resetUser.phone || null,
         church: resetUser.church ?? null,
         role: resetUser.role || 'uploader',
         password: resetPassword
@@ -598,19 +627,23 @@ export default function App(){
             </div>
             <div>
               <h4>Create user</h4>
-              <CreateUserForm onCreate={(u,p,c,r)=> createUser(u,p,c,r)} churches={churches} scopedChurchId={currentUserChurchId} canAccessChurch={canAccessChurch} onRestrictedChurchAttempt={denyRestrictedChurchAccess} />
+              <CreateUserForm onCreate={createUser} churches={churches} scopedChurchId={currentUserChurchId} canAccessChurch={canAccessChurch} onRestrictedChurchAttempt={denyRestrictedChurchAccess} roleOptions={roleOptionsForCurrentUser()} roleLabel={roleLabel} />
             </div>
             <div style={{marginTop:12}}>
               <h4>Users</h4>
               <table border={1} cellPadding={6} style={{borderCollapse:'collapse'}}>
-                <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Church</th><th>Actions</th></tr></thead>
+                <thead><tr><th>ID</th><th>Username</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Church</th><th>Actions</th></tr></thead>
                 <tbody>
                   {usersList.map(u=> {
                     const chName = (churches||[]).find(c=> Number(c.id)===Number(u.church))?.name || u.church
+                    const fullName = [u.first_name, u.middle_name, u.last_name].filter(Boolean).join(' ')
                     return (
                       <tr key={u.id}>
                         <td>{u.id}</td>
                         <td>{u.username}</td>
+                        <td>{fullName || '-'}</td>
+                        <td>{u.email || '-'}</td>
+                        <td>{u.phone || '-'}</td>
                         <td>{roleLabel(u.role)}</td>
                         <td>{chName}</td>
                         <td>
@@ -628,10 +661,14 @@ export default function App(){
                   <h4>Edit User: {editingUser.username}</h4>
                   <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                     <input value={userEditForm.username} placeholder='username' onChange={e=>setUserEditForm(prev=>({...prev, username:e.target.value}))} />
+                    <input value={userEditForm.first_name||''} placeholder='first name' onChange={e=>setUserEditForm(prev=>({...prev, first_name:e.target.value}))} />
+                    <input value={userEditForm.middle_name||''} placeholder='middle name' onChange={e=>setUserEditForm(prev=>({...prev, middle_name:e.target.value}))} />
+                    <input value={userEditForm.last_name||''} placeholder='last name' onChange={e=>setUserEditForm(prev=>({...prev, last_name:e.target.value}))} />
+                    <input value={userEditForm.email||''} placeholder='email' onChange={e=>setUserEditForm(prev=>({...prev, email:e.target.value}))} />
+                    <input value={userEditForm.phone||''} placeholder='phone' onChange={e=>setUserEditForm(prev=>({...prev, phone:e.target.value}))} />
                     <select value={userEditForm.role} onChange={e=>setUserEditForm(prev=>({...prev, role:e.target.value}))}>
                       {roleOptionsForCurrentUser().map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                     </select>
-                                  <CreateUserForm onCreate={(u,p,c,r)=> createUser(u,p,c,r)} churches={churches} scopedChurchId={currentUserChurchId} canAccessChurch={canAccessChurch} onRestrictedChurchAttempt={denyRestrictedChurchAccess} roleOptions={roleOptionsForCurrentUser()} roleLabel={roleLabel} />
                     <select value={userEditForm.church ?? ''} onChange={e=>{
                       const v = e.target.value
                       if(!canAccessChurch(v)){ denyRestrictedChurchAccess('user management'); return }
@@ -1052,6 +1089,11 @@ export default function App(){
 function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, onRestrictedChurchAttempt, roleOptions = ['uploader'], roleLabel = (r)=>String(r)}){
   const [u, setU] = useState('')
   const [p, setP] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [middleName, setMiddleName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [c, setC] = useState(churches[0]?.id || null)
   const [r, setR] = useState((roleOptions && roleOptions.length ? roleOptions[0] : 'uploader'))
   const passwordHint = 'Password: minimum 8 characters, include at least 1 letter, 1 number, and 1 special character.'
@@ -1065,6 +1107,11 @@ function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, on
       <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
         <input placeholder='username' value={u} onChange={e=>setU(e.target.value)} />
         <input placeholder='password' value={p} onChange={e=>setP(e.target.value)} />
+        <input placeholder='first name' value={firstName} onChange={e=>setFirstName(e.target.value)} />
+        <input placeholder='middle name' value={middleName} onChange={e=>setMiddleName(e.target.value)} />
+        <input placeholder='last name' value={lastName} onChange={e=>setLastName(e.target.value)} />
+        <input placeholder='email' value={email} onChange={e=>setEmail(e.target.value)} />
+        <input placeholder='phone' value={phone} onChange={e=>setPhone(e.target.value)} />
         <select value={c||''} onChange={e=>{
           const val = e.target.value
           if(typeof canAccessChurch === 'function' && !canAccessChurch(val)){
@@ -1079,7 +1126,7 @@ function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, on
         <select value={r} onChange={e=>setR(e.target.value)}>
           {(roleOptions && roleOptions.length ? roleOptions : ['uploader']).map(opt => <option key={opt} value={opt}>{roleLabel(opt)}</option>)}
         </select>
-        <button onClick={()=> onCreate(u,p,c,r)}>Create</button>
+        <button onClick={()=> onCreate(u,p,c,r,firstName,middleName,lastName,email,phone)}>Create</button>
       </div>
       <div style={{marginTop:6,fontSize:12,color:'#666'}}>{passwordHint}</div>
     </div>
