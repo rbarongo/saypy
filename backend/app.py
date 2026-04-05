@@ -876,7 +876,7 @@ def list_users(current_user: dict = Depends(get_current_user)):
                 res = conn.execute(text('SELECT id, username, church, role, created_at FROM users'))
             else:
                 res = conn.execute(text('SELECT id, username, church, role, created_at FROM users WHERE church=:c'), {'c': current_church})
-            rows = [dict(r) for r in res.fetchall()]
+            rows = [dict(r._mapping) for r in res.fetchall()]
         return rows
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
