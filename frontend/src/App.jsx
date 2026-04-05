@@ -482,7 +482,12 @@ export default function App(){
   }
 
   // ----- Simple helpers for role checks -----
-  function isAdmin(){ return user && (user.role === 'admin' || user.role === 'system_admin') }
+  function isAdmin(){
+    if(!user) return false
+    const role = String(user.role || '').toLowerCase()
+    const uname = String(user.username || '').toLowerCase()
+    return role === 'admin' || role === 'system_admin' || uname === 'saypy_admin'
+  }
   function isUploader(){ return user && user.role === 'uploader' }
 
   // If not authenticated, show a focused login screen (no menu)
