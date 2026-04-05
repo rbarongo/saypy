@@ -27,6 +27,17 @@ export default function App(){
   const [token, setToken] = useState(localStorage.getItem('token') || '')
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')||'null'))
   const [status, setStatus] = useState('')
+  const currentUserChurchId = user && user.church != null ? Number(user.church) : null
+
+  function canAccessChurch(churchId){
+    if(churchId === null || churchId === undefined || churchId === '') return true
+    if(currentUserChurchId === null || Number.isNaN(currentUserChurchId)) return true
+    return Number(churchId) === currentUserChurchId
+  }
+
+  function denyRestrictedChurchAccess(context){
+    setStatus(`Restricted information: you cannot access ${context} for another church`)
+  }
 
   // ----- Shared data -----
   const [churches, setChurches] = useState([])
@@ -481,9 +492,13 @@ export default function App(){
                     const val = memberForm[key]===undefined? '': memberForm[key]
                     if(key==='church'){
                       return (
-                        <select key={key} value={val||''} onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value}))}>
+                        <select key={key} value={val||''} onChange={e=>{
+                          const selected = e.target.value
+                          if(!canAccessChurch(selected)){ denyRestrictedChurchAccess('member data'); return }
+                          setMemberForm(prev=>({...prev,[key]: selected}))
+                        }}>
                           <option value=''>-- church --</option>
-                          {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+                          {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
                         </select>
                       )
                     }
@@ -550,6 +565,8 @@ export default function App(){
               fetchCodes={fetchCodes}
               user={user}
               labelForColumn={labelForColumn}
+              scopedChurchId={currentUserChurchId}
+              onRestrictedChurchAttempt={denyRestrictedChurchAccess}
             />
             {showCollectionsTable && (
               <div style={{marginTop:12}}>
@@ -670,6 +687,7 @@ export default function App(){
                         <div key={k} style={{display:'flex',flexDirection:'column'}}>
                           <select value={val||''} onChange={e=>{
                             const newChurch = e.target.value || null
+                            if(!canAccessChurch(newChurch)){ denyRestrictedChurchAccess('members_collection data'); return }
                             setEditingCollection(prev=>{
                               const next = {...prev, [k]: newChurch}
                               try{
@@ -687,7 +705,7 @@ export default function App(){
                             })
                           }}>
                             <option value=''>-- church --</option>
-                            {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+                            {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
                           </select>
                           <div style={{fontSize:12,color:'#666'}}>{editingCollection && editingCollection.__verified? 'Name verified in members':'Not verified'}</div>
                         </div>
@@ -848,7 +866,7 @@ function CreateUserForm({onCreate, churches}){
   )
 }
 
-function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn}){
+function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn, scopedChurchId, onRestrictedChurchAttempt}){
   // simplified copy of the prior upload UI kept local to this component scope
   const [step, setStep] = useState(1)
   const [file, setFile] = useState(null)
@@ -872,6 +890,22 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
 
   useEffect(()=>{ fetchCodes() }, [])
   useEffect(()=>{ if(user && !uploaderName) setUploaderName(user.username) }, [user])
+  useEffect(()=>{
+    if(scopedChurchId !== null && scopedChurchId !== undefined && !Number.isNaN(Number(scopedChurchId))){
+      setSelectedChurch(String(scopedChurchId))
+    }
+  }, [scopedChurchId])
+
+  function canAccessChurch(churchId){
+    if(churchId === null || churchId === undefined || churchId === '') return true
+    if(scopedChurchId === null || scopedChurchId === undefined || Number.isNaN(Number(scopedChurchId))) return true
+    return Number(churchId) === Number(scopedChurchId)
+  }
+
+  function handleRestrictedChurch(context){
+    if(typeof onRestrictedChurchAttempt === 'function') onRestrictedChurchAttempt(context)
+    showPrompt('error', `Restricted information: you cannot access ${context} for another church`)
+  }
 
   function showPrompt(level, message){
     setCopiedPrompt(false)
@@ -1039,9 +1073,13 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
             <label>Date:</label>
             <input type='date' value={selectedDate} onChange={e=>{ setSelectedDate(e.target.value) }} />
             <label style={{marginLeft:8}}>Church:</label>
-            <select value={selectedChurch||''} onChange={e=>{ setSelectedChurch(e.target.value) }}>
+            <select value={selectedChurch||''} onChange={e=>{
+              const nextChurch = e.target.value
+              if(!canAccessChurch(nextChurch)){ handleRestrictedChurch('collection upload'); return }
+              setSelectedChurch(nextChurch)
+            }}>
               <option value=''>-- select --</option>
-              {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+              {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
             </select>
             <label style={{marginLeft:8}}>Uploader name:</label>
             <input value={uploaderName} onChange={e=>setUploaderName(e.target.value)} />
@@ -1057,9 +1095,13 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
             <label>Date:</label>
             <input type='date' value={selectedDate} onChange={e=>{ setSelectedDate(e.target.value); recomputeMappedPreview() }} />
             <label style={{marginLeft:8}}>Church:</label>
-            <select value={selectedChurch||''} onChange={e=>{ setSelectedChurch(e.target.value); recomputeMappedPreview() }}>
+            <select value={selectedChurch||''} onChange={e=>{
+              const nextChurch = e.target.value
+              if(!canAccessChurch(nextChurch)){ handleRestrictedChurch('collection upload'); return }
+              setSelectedChurch(nextChurch); recomputeMappedPreview()
+            }}>
               <option value=''>-- select --</option>
-              {churches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+              {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
             </select>
             <label style={{marginLeft:8}}>Uploader name:</label>
             <input value={uploaderName} onChange={e=>{ setUploaderName(e.target.value); recomputeMappedPreview() }} />

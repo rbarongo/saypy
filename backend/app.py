@@ -75,6 +75,57 @@ def require_api_key_or_user(request: Request, credentials: HTTPAuthorizationCred
 
     raise HTTPException(status_code=401, detail='Missing authentication (API key or Bearer token)')
 
+
+def _resolve_church_id(value) -> Optional[int]:
+    """Resolve church input (id or name) into a church id."""
+    if value is None or value == '':
+        return None
+    if isinstance(value, int):
+        return int(value)
+    try:
+        s = str(value).strip()
+        if s == '':
+            return None
+        if s.isdigit():
+            return int(s)
+    except Exception:
+        pass
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(text('SELECT id FROM church WHERE name=:n'), {'n': str(value)})
+            try:
+                cid = res.scalar()
+            except Exception:
+                row = res.fetchone()
+                cid = row[0] if row else None
+        return int(cid) if cid is not None else None
+    except Exception:
+        return None
+
+
+def _auth_context_church(auth: dict) -> Optional[int]:
+    if not isinstance(auth, dict):
+        return None
+    u = auth.get('user') if isinstance(auth.get('user'), dict) else None
+    up = auth.get('uploader') if isinstance(auth.get('uploader'), dict) else None
+    if u and u.get('church') is not None:
+        return _resolve_church_id(u.get('church'))
+    if up and up.get('church') is not None:
+        return _resolve_church_id(up.get('church'))
+    return None
+
+
+def _enforce_church_scope(target_church, actor_church: Optional[int], context: str = 'requested data') -> Optional[int]:
+    """Return the effective church id, or raise 403 if cross-church access is attempted."""
+    t = _resolve_church_id(target_church)
+    if actor_church is None:
+        return t
+    if t is None:
+        return int(actor_church)
+    if int(t) != int(actor_church):
+        raise HTTPException(status_code=403, detail=f"Restricted information: your account cannot access {context} for another church")
+    return int(actor_church)
+
 app.add_middleware(
     CORSMiddleware,
     # Allow all origins for local development to avoid CORS issues from different localhost variants
@@ -195,6 +246,7 @@ async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api
     out_df = pd.DataFrame(mapped)
     # If an uploader API key is provided, use uploader's church and source
     uploader = auth.get('uploader') if isinstance(auth, dict) else None
+    actor_church = _auth_context_church(auth)
     # if uploader provided, apply defaults
     if uploader:
         try:
@@ -204,6 +256,8 @@ async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api
                 out_df['source'] = out_df.get('source', pd.Series([uploader.get('name')] * len(out_df)))
         except Exception:
             pass
+    if actor_church is not None:
+        out_df['church'] = actor_church
     # Filter rows: only keep rows where the guessed S1/serial column has a non-empty value
     s1_col = _guess_s1_column(out_df)
     if s1_col is not None:
@@ -250,7 +304,7 @@ async def upload_headers(batch: UploadFile = File(...), auth: dict = Depends(req
 
 
 @app.post('/submit/{table_name}')
-async def submit_form(table_name: str, request: Request):
+async def submit_form(table_name: str, request: Request, auth: dict = Depends(require_api_key_or_user)):
     """Accept form-encoded or JSON submissions and insert into the named table.
 
     Allowed tables: `collection_codes`, `members_collections`, `members`.
@@ -274,6 +328,9 @@ async def submit_form(table_name: str, request: Request):
 
     # Normalize: convert single-value lists to values
     row = {k: (v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v) for k, v in payload.items()}
+    actor_church = _auth_context_church(auth)
+    if table_name in {"members_collection", "members_collections", "members"}:
+        row['church'] = _enforce_church_scope(row.get('church'), actor_church, context=f'{table_name} submission')
     df = pd.DataFrame([row])
     insert_dataframe(df, table_name=table_name)
     return {"inserted": 1, "table": table_name}
@@ -306,8 +363,10 @@ class MemberCollectionIn(BaseModel):
 
 
 @app.post('/members')
-def create_member(payload: MemberIn):
+def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     """Create a member record and return its id."""
+    actor_church = _auth_context_church(auth)
+    effective_church = _enforce_church_scope(payload.church, actor_church, context='member creation')
     pk = insert_member(
         sno=payload.sno,
         MEMBER_NAME=payload.MEMBER_NAME,
@@ -326,19 +385,22 @@ def create_member(payload: MemberIn):
         PHONE2=payload.PHONE2,
         EMAIL=payload.EMAIL,
         RESIDENCE=payload.RESIDENCE,
-        church=payload.church,
+        church=effective_church,
     )
     return {"id": pk}
 
 
 @app.post('/members_collection')
-def create_members_collection(payload: MemberCollectionIn):
+def create_members_collection(payload: MemberCollectionIn, auth: dict = Depends(require_api_key_or_user)):
     """Create a members_collection row. `member_id` may be omitted if you will link later."""
+    actor_church = _auth_context_church(auth)
+    if actor_church is not None:
+        raise HTTPException(status_code=400, detail='Use /members_collections/bulk for church-scoped inserts')
     pk = insert_members_collection(collection_code=payload.collection_code, member_id=payload.member_id)
     return {"id": pk}
 
 @app.put('/members_collection/{row_id}')
-def update_members_collection(row_id: int, payload: dict):
+def update_members_collection(row_id: int, payload: dict, auth: dict = Depends(require_api_key_or_user)):
     """Update a members_collection row by id. Accepts any subset of columns present in the table."""
     try:
         # limit updates to known columns to avoid SQL injection
@@ -348,6 +410,15 @@ def update_members_collection(row_id: int, payload: dict):
         update_cols = {k: v for k, v in payload.items() if k in cols and k != 'id'}
         if not update_cols:
             raise HTTPException(status_code=400, detail='No updatable columns provided')
+
+        actor_church = _auth_context_church(auth)
+        if actor_church is not None:
+            with engine.connect() as conn:
+                existing = conn.execute(text('SELECT church FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail='members_collection row not found')
+            _enforce_church_scope(existing[0], actor_church, context='this members_collection record')
+            update_cols['church'] = _enforce_church_scope(update_cols.get('church'), actor_church, context='members_collection update')
 
         if any(k in update_cols for k in ('s2', 's3', 'church', 's1')):
             with engine.connect() as conn:
@@ -384,6 +455,7 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
         raise HTTPException(status_code=400, detail={"message": "No rows provided", "received": received_count})
     # Pre-process rows: resolve church names/defaults and normalize identifiers.
     uploader = auth.get('uploader') if isinstance(auth, dict) else None
+    actor_church = _auth_context_church(auth)
     pre_rows = []
     for i, r in enumerate(rows):
         row = dict(r)
@@ -392,19 +464,7 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
         church_val = row.get('church')
         if (church_val is None or church_val == '') and uploader and uploader.get('church'):
             row['church'] = uploader.get('church')
-        if church_val is not None and not isinstance(church_val, int):
-            try:
-                with engine.connect() as conn:
-                    res = conn.execute(text('SELECT id FROM church WHERE name=:n'), {'n': str(church_val)})
-                    try:
-                        cid = res.scalar()
-                    except Exception:
-                        rr = res.fetchone()
-                        cid = rr[0] if rr else None
-                if cid:
-                    row['church'] = int(cid)
-            except Exception:
-                pass
+        row['church'] = _enforce_church_scope(row.get('church'), actor_church, context='bulk members_collection insert')
 
         for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
             if row.get(sk) is not None and not isinstance(row.get(sk), str):
@@ -562,6 +622,7 @@ def validate_members_collections(rows: List[dict], auth: dict = Depends(require_
     pre_rows = []
     # If API key present, use uploader to default church/source
     uploader = auth.get('uploader') if isinstance(auth, dict) else None
+    actor_church = _auth_context_church(auth)
 
     for i, r in enumerate(rows):
         row = dict(r)
@@ -569,21 +630,7 @@ def validate_members_collections(rows: List[dict], auth: dict = Depends(require_
         church_val = row.get('church')
         if (church_val is None or church_val == '') and uploader and uploader.get('church'):
             row['church'] = uploader.get('church')
-        if church_val is not None and not isinstance(church_val, int):
-            # try to resolve name -> id
-            try:
-                with engine.connect() as conn:
-                    res = conn.execute(text('SELECT id FROM church WHERE name=:n'), {'n': str(church_val)})
-                    try:
-                        cid = res.scalar()
-                    except Exception:
-                        rr = res.fetchone()
-                        cid = rr[0] if rr else None
-                if cid:
-                    row['church'] = int(cid)
-            except Exception:
-                # leave as-is; validation will catch missing church if required elsewhere
-                pass
+        row['church'] = _enforce_church_scope(row.get('church'), actor_church, context='validation request')
 
         for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
             if row.get(sk) is not None and not isinstance(row.get(sk), str):
@@ -637,28 +684,36 @@ class UploaderIn(BaseModel):
 @app.post('/uploaders')
 def create_uploader_endpoint(payload: UploaderIn, current_user: dict = Depends(get_current_user)):
     try:
-        church_id = payload.church if payload.church is not None else current_user.get('church')
+        current_church = _resolve_church_id(current_user.get('church'))
+        church_id = _enforce_church_scope(payload.church, current_church, context='uploader creation')
         key = create_uploader(payload.name, church_id)
         return {"api_key": key}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get('/uploaders')
-def list_uploaders_endpoint():
+def list_uploaders_endpoint(current_user: dict = Depends(get_current_user)):
     try:
         out = list_uploaders()
+        user_church = _resolve_church_id(current_user.get('church')) if isinstance(current_user, dict) else None
+        if user_church is not None:
+            out = [u for u in out if _resolve_church_id(u.get('church')) == user_church]
         return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get('/uploaders/{api_key}')
-def get_uploader_by_key_endpoint(api_key: str):
+def get_uploader_by_key_endpoint(api_key: str, current_user: dict = Depends(get_current_user)):
     try:
         u = get_uploader_by_key(api_key)
         if not u:
             raise HTTPException(status_code=404, detail="Uploader not found")
+        user_church = _resolve_church_id(current_user.get('church')) if isinstance(current_user, dict) else None
+        _enforce_church_scope(u.get('church'), user_church, context='uploader details')
         return u
     except HTTPException:
         raise
@@ -692,7 +747,13 @@ def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentia
             if not creator or creator.get('role') != 'admin':
                 raise HTTPException(status_code=403, detail='Only admins can create users with elevated roles')
 
-        out = create_user(payload.username, payload.password, payload.church, role=role)
+        creator_church = None
+        if credentials and credentials.credentials:
+            creator = get_user_by_token(credentials.credentials)
+            creator_church = _resolve_church_id(creator.get('church')) if creator else None
+        requested_church = _resolve_church_id(payload.church)
+        effective_church = _enforce_church_scope(requested_church, creator_church, context='user registration')
+        out = create_user(payload.username, payload.password, effective_church, role=role)
         return out
     except HTTPException:
         raise
@@ -715,8 +776,12 @@ def list_users(current_user: dict = Depends(get_current_user)):
     if current_user.get('role') != 'admin':
         raise HTTPException(status_code=403, detail='Not authorized')
     try:
+        current_church = _resolve_church_id(current_user.get('church'))
         with engine.connect() as conn:
-            res = conn.execute(text('SELECT id, username, church, role, created_at FROM users'))
+            if current_church is None:
+                res = conn.execute(text('SELECT id, username, church, role, created_at FROM users'))
+            else:
+                res = conn.execute(text('SELECT id, username, church, role, created_at FROM users WHERE church=:c'), {'c': current_church})
             rows = [dict(r) for r in res.fetchall()]
         return rows
     except Exception as e:
@@ -729,23 +794,33 @@ def update_user(user_id: int, payload: UserRegister, current_user: dict = Depend
     if current_user.get('role') != 'admin':
         raise HTTPException(status_code=403, detail='Not authorized')
     try:
+        current_church = _resolve_church_id(current_user.get('church'))
+        requested_church = _resolve_church_id(payload.church)
+        effective_church = _enforce_church_scope(requested_church, current_church, context='user update')
         # update username, church, role, and optionally password
         with engine.connect() as conn:
+            if current_church is not None:
+                existing = conn.execute(text('SELECT church FROM users WHERE id=:id'), {'id': user_id}).fetchone()
+                if not existing:
+                    raise HTTPException(status_code=404, detail='user not found')
+                _enforce_church_scope(existing[0], current_church, context='this user record')
             if payload.password:
                 # create new salt/hash
                 salt = os.urandom(16)
                 ph = _hash_password(payload.password, salt)
                 salt_hex = binascii.hexlify(salt).decode('ascii')
                 conn.execute(text('UPDATE users SET username=:u, password_hash=:ph, salt=:s, church=:c, role=:r WHERE id=:id'),
-                             {'u': payload.username, 'ph': ph, 's': salt_hex, 'c': payload.church, 'r': (payload.role or 'uploader'), 'id': user_id})
+                             {'u': payload.username, 'ph': ph, 's': salt_hex, 'c': effective_church, 'r': (payload.role or 'uploader'), 'id': user_id})
             else:
                 conn.execute(text('UPDATE users SET username=:u, church=:c, role=:r WHERE id=:id'),
-                             {'u': payload.username, 'c': payload.church, 'r': (payload.role or 'uploader'), 'id': user_id})
+                             {'u': payload.username, 'c': effective_church, 'r': (payload.role or 'uploader'), 'id': user_id})
             try:
                 conn.commit()
             except Exception:
                 pass
         return {'ok': True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -774,9 +849,12 @@ def update_collection_code(code_id: int, payload: CollectionCodeIn):
 
 
 @app.get('/members')
-def list_members(q: Optional[str] = None):
+def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     try:
         df = pd.read_sql_table('members', con=engine)
+        actor_church = _auth_context_church(auth)
+        if actor_church is not None and 'church' in df.columns:
+            df = df[df['church'] == actor_church]
         if q:
             # Search MEMBER_NAME text or exact MEMBER_ID when numeric
             try:
@@ -795,8 +873,17 @@ def list_members(q: Optional[str] = None):
 
 
 @app.put('/members/{member_id}')
-def update_member(member_id: int, payload: MemberIn):
+def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     try:
+        actor_church = _auth_context_church(auth)
+        if actor_church is not None:
+            with engine.connect() as conn:
+                existing = conn.execute(text('SELECT church FROM members WHERE id=:id'), {'id': member_id}).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail='member not found')
+            _enforce_church_scope(existing[0], actor_church, context='this member record')
+        effective_church = _enforce_church_scope(payload.church, actor_church, context='member update')
+
         with engine.connect() as conn:
             conn.execute(
                 text(
@@ -842,7 +929,7 @@ def update_member(member_id: int, payload: MemberIn):
                     "phone2": payload.PHONE2,
                     "email": payload.EMAIL,
                     "res": payload.RESIDENCE,
-                    "church": payload.church,
+                    "church": effective_church,
                     "id": member_id,
                 },
             )
@@ -851,16 +938,21 @@ def update_member(member_id: int, payload: MemberIn):
             except Exception:
                 pass
         return {"ok": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get('/reports/members_collections')
-def report_members_collections(start_date: Optional[str] = None, end_date: Optional[str] = None):
+def report_members_collections(start_date: Optional[str] = None, end_date: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     """Return members_collection rows, optionally filtered by s2 (date) range. Dates in ISO format."""
     try:
         # Read full table into pandas then filter by s2 in Python to avoid SQL param dialect issues
         df = pd.read_sql_table('members_collection', con=engine)
+        actor_church = _auth_context_church(auth)
+        if actor_church is not None and 'church' in df.columns:
+            df = df[df['church'] == actor_church]
         # Parse provided dates defensively. Accept either full ISO datetimes or simple YYYY-MM-DD.
         try:
             start_dt = pd.to_datetime(start_date, errors='coerce') if start_date else None
@@ -919,7 +1011,7 @@ def on_startup():
 
 
 @app.get('/members_view')
-def get_members_view():
+def get_members_view(auth: dict = Depends(require_api_key_or_user)):
     """Return rows from `members_view`. If the view doesn't exist, attempt to create it
     from the `members` table (if present).
     """
@@ -944,6 +1036,13 @@ def get_members_view():
     try:
         df = pd.read_sql_table('members_view', con=engine)
         rows = df.to_dict(orient='records')
+        actor_church = _auth_context_church(auth)
+        if actor_church is not None:
+            filtered_rows = []
+            for r in rows:
+                if _resolve_church_id(r.get('church')) == actor_church:
+                    filtered_rows.append(r)
+            rows = filtered_rows
         out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
         return out
     except Exception as e:
