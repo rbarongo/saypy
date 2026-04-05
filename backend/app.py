@@ -830,6 +830,11 @@ def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentia
         creator_church = None if creator_role == ROLE_SYSTEM_ADMIN else _resolve_church_id(creator.get('church'))
         requested_church = _resolve_church_id(payload.church)
         effective_church = _enforce_church_scope(requested_church, creator_church, context='user registration')
+        requested_username = str(payload.username or '').strip().lower()
+        if requested_username == 'saypy_admin' and effective_church is not None:
+            raise HTTPException(status_code=400, detail='saypy_admin must have church set to null')
+        if requested_username != 'saypy_admin' and effective_church is None:
+            raise HTTPException(status_code=400, detail='Church is required for all users except saypy_admin')
         out = create_user(payload.username, payload.password, effective_church, role=role)
         return out
     except HTTPException:
@@ -876,6 +881,11 @@ def update_user(user_id: int, payload: UserRegister, current_user: dict = Depend
         current_church = None if role_self == ROLE_SYSTEM_ADMIN else _resolve_church_id(current_user.get('church'))
         requested_church = _resolve_church_id(payload.church)
         effective_church = _enforce_church_scope(requested_church, current_church, context='user update')
+        requested_username = str(payload.username or '').strip().lower()
+        if requested_username == 'saypy_admin' and effective_church is not None:
+            raise HTTPException(status_code=400, detail='saypy_admin must have church set to null')
+        if requested_username != 'saypy_admin' and effective_church is None:
+            raise HTTPException(status_code=400, detail='Church is required for all users except saypy_admin')
         next_role = str(payload.role or ROLE_UPLOADER).strip().lower()
         if next_role not in ALL_ROLES:
             raise HTTPException(status_code=400, detail='Invalid role')
@@ -1066,6 +1076,36 @@ def report_members_collections(start_date: Optional[str] = None, end_date: Optio
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _log_user_church_policy_violations():
+    """Log users violating the church assignment policy.
+
+    Policy: only `saypy_admin` can have church=NULL.
+    """
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT id, username, role
+                    FROM users
+                    WHERE church IS NULL
+                      AND LOWER(username) <> 'saypy_admin'
+                    ORDER BY id
+                """)
+            ).fetchall()
+        if not rows:
+            logger.info("User church policy check passed: no violations found")
+            return
+
+        sample = [f"id={r[0]}, username={r[1]}, role={r[2]}" for r in rows[:10]]
+        logger.warning(
+            "User church policy violation: %s user(s) have church=NULL but are not saypy_admin. Sample: %s",
+            len(rows),
+            "; ".join(sample),
+        )
+    except Exception:
+        logger.exception("Failed to run user church policy validation")
+
+
 @app.on_event("startup")
 def on_startup():
     try:
@@ -1073,6 +1113,8 @@ def on_startup():
     except Exception:
         logger.exception("Database initialization failed during startup")
         raise
+
+    _log_user_church_policy_violations()
 
     # If members table exists but is empty, attempt to initialize from Members.xlsx
     try:

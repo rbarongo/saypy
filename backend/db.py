@@ -626,6 +626,11 @@ def _hash_password(password: str, salt: bytes) -> str:
 
 def create_user(username: str, password: str, church_id: Optional[int] = None, role: str = 'uploader') -> dict:
     ensure_db_exists()
+    uname = str(username or '').strip().lower()
+    if uname == 'saypy_admin':
+        church_id = None
+    elif church_id is None:
+        raise ValueError('User church is required for all users except saypy_admin')
     salt = os.urandom(16)
     ph = _hash_password(password, salt)
     salt_hex = binascii.hexlify(salt).decode('ascii')

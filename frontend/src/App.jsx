@@ -107,8 +107,15 @@ export default function App(){
   async function fetchUsers(){
     try{
       const res = await fetch('http://localhost:8000/users', { headers: authHeaders() })
-      if(!res.ok) throw new Error('Not authorized')
-      const data = await res.json()
+      const data = await res.json().catch(()=> ({}))
+      if(!res.ok){
+        const detail = (data && data.detail) ? String(data.detail) : `HTTP ${res.status}`
+        if(res.status === 401){
+          logout()
+          throw new Error('Session expired. Please login again. ' + detail)
+        }
+        throw new Error(detail)
+      }
       setUsersList(data)
     }catch(e){ setStatus('Fetch users failed: '+e.message) }
   }
