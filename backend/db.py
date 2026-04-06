@@ -451,6 +451,22 @@ uploaders = Table(
 )
 
 
+role_policies = Table(
+    'role_policies', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('role', String(80), nullable=False, unique=True),
+    Column('display_name', String(160), nullable=True),
+    Column('can_view_dashboard', Integer, nullable=False, server_default='1'),
+    Column('can_manage_users', Integer, nullable=False, server_default='0'),
+    Column('can_manage_members', Integer, nullable=False, server_default='0'),
+    Column('can_manage_collections', Integer, nullable=False, server_default='0'),
+    Column('can_view_reports', Integer, nullable=False, server_default='0'),
+    Column('can_manage_settings', Integer, nullable=False, server_default='0'),
+    Column('can_manage_roles', Integer, nullable=False, server_default='0'),
+    Column('system_protected', Integer, nullable=False, server_default='0'),
+)
+
+
 users = Table(
     'users', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
@@ -479,7 +495,7 @@ def create_tables():
     """Create `members` and `members_collection` tables if they do not exist."""
     ensure_db_exists()
     # Create base tables first.
-    metadata.create_all(engine, tables=[church, members, collection_codes, header_mappings, uploaders, users, tokens])
+    metadata.create_all(engine, tables=[church, members, collection_codes, header_mappings, uploaders, role_policies, users, tokens])
 
     # Ensure referenced members columns are uniquely constrained before creating dependent FKs.
     try:
@@ -534,9 +550,220 @@ def create_tables():
     except Exception:
         pass
     try:
+        seed_role_policies()
+    except Exception:
+        pass
+    try:
         seed_churches()
     except Exception:
         pass
+
+
+def seed_role_policies():
+    """Seed built-in role policies if table is empty."""
+    ensure_db_exists()
+    inspector = inspect(engine)
+    if 'role_policies' not in inspector.get_table_names():
+        return
+    with engine.connect() as conn:
+        res = conn.execute(text('SELECT COUNT(*) FROM role_policies'))
+        try:
+            cnt = res.scalar()
+        except Exception:
+            row = res.fetchone()
+            cnt = row[0] if row else 0
+        if cnt and int(cnt) > 0:
+            return
+
+        defaults = [
+            {
+                'role': 'system_admin',
+                'display_name': 'System Admin',
+                'can_view_dashboard': 1,
+                'can_manage_users': 1,
+                'can_manage_members': 1,
+                'can_manage_collections': 1,
+                'can_view_reports': 1,
+                'can_manage_settings': 1,
+                'can_manage_roles': 1,
+                'system_protected': 1,
+            },
+            {
+                'role': 'admin',
+                'display_name': 'Church Admin',
+                'can_view_dashboard': 1,
+                'can_manage_users': 1,
+                'can_manage_members': 1,
+                'can_manage_collections': 1,
+                'can_view_reports': 1,
+                'can_manage_settings': 1,
+                'can_manage_roles': 0,
+                'system_protected': 1,
+            },
+            {
+                'role': 'treasurer',
+                'display_name': 'Treasurer',
+                'can_view_dashboard': 1,
+                'can_manage_users': 0,
+                'can_manage_members': 0,
+                'can_manage_collections': 1,
+                'can_view_reports': 1,
+                'can_manage_settings': 0,
+                'can_manage_roles': 0,
+                'system_protected': 1,
+            },
+            {
+                'role': 'data_steward',
+                'display_name': 'Data Steward',
+                'can_view_dashboard': 1,
+                'can_manage_users': 0,
+                'can_manage_members': 1,
+                'can_manage_collections': 1,
+                'can_view_reports': 1,
+                'can_manage_settings': 0,
+                'can_manage_roles': 0,
+                'system_protected': 1,
+            },
+            {
+                'role': 'uploader',
+                'display_name': 'Uploader',
+                'can_view_dashboard': 1,
+                'can_manage_users': 0,
+                'can_manage_members': 0,
+                'can_manage_collections': 1,
+                'can_view_reports': 0,
+                'can_manage_settings': 0,
+                'can_manage_roles': 0,
+                'system_protected': 1,
+            },
+            {
+                'role': 'viewer',
+                'display_name': 'Viewer',
+                'can_view_dashboard': 1,
+                'can_manage_users': 0,
+                'can_manage_members': 0,
+                'can_manage_collections': 0,
+                'can_view_reports': 1,
+                'can_manage_settings': 0,
+                'can_manage_roles': 0,
+                'system_protected': 1,
+            },
+        ]
+        for item in defaults:
+            try:
+                conn.execute(sql_insert(role_policies).values(**item))
+            except Exception:
+                pass
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+
+def list_role_policies() -> List[dict]:
+    ensure_db_exists()
+    out = []
+    with engine.connect() as conn:
+        try:
+            res = conn.execute(text('''
+                SELECT id, role, display_name,
+                       can_view_dashboard, can_manage_users, can_manage_members,
+                       can_manage_collections, can_view_reports,
+                       can_manage_settings, can_manage_roles, system_protected
+                FROM role_policies
+                ORDER BY role
+            '''))
+            for r in res.fetchall():
+                out.append({
+                    'id': r[0],
+                    'role': r[1],
+                    'display_name': r[2],
+                    'can_view_dashboard': bool(r[3]),
+                    'can_manage_users': bool(r[4]),
+                    'can_manage_members': bool(r[5]),
+                    'can_manage_collections': bool(r[6]),
+                    'can_view_reports': bool(r[7]),
+                    'can_manage_settings': bool(r[8]),
+                    'can_manage_roles': bool(r[9]),
+                    'system_protected': bool(r[10]),
+                })
+        except Exception:
+            pass
+    return out
+
+
+def role_exists(role_name: str) -> bool:
+    rn = str(role_name or '').strip().lower()
+    if rn == '':
+        return False
+    with engine.connect() as conn:
+        try:
+            res = conn.execute(text('SELECT COUNT(*) FROM role_policies WHERE LOWER(role)=:r'), {'r': rn})
+            try:
+                cnt = res.scalar() or 0
+            except Exception:
+                row = res.fetchone()
+                cnt = row[0] if row else 0
+            return int(cnt) > 0
+        except Exception:
+            return False
+
+
+def upsert_role_policy(role_name: str, display_name: Optional[str], rights: dict) -> dict:
+    rn = str(role_name or '').strip().lower()
+    if rn == '':
+        raise ValueError('role is required')
+    payload = {
+        'role': rn,
+        'display_name': (display_name or '').strip() or rn,
+        'can_view_dashboard': 1 if rights.get('can_view_dashboard') else 0,
+        'can_manage_users': 1 if rights.get('can_manage_users') else 0,
+        'can_manage_members': 1 if rights.get('can_manage_members') else 0,
+        'can_manage_collections': 1 if rights.get('can_manage_collections') else 0,
+        'can_view_reports': 1 if rights.get('can_view_reports') else 0,
+        'can_manage_settings': 1 if rights.get('can_manage_settings') else 0,
+        'can_manage_roles': 1 if rights.get('can_manage_roles') else 0,
+    }
+    with engine.connect() as conn:
+        existing = conn.execute(text('SELECT id, system_protected FROM role_policies WHERE LOWER(role)=:r'), {'r': rn}).fetchone()
+        if existing:
+            conn.execute(text('''
+                UPDATE role_policies
+                SET display_name=:display_name,
+                    can_view_dashboard=:can_view_dashboard,
+                    can_manage_users=:can_manage_users,
+                    can_manage_members=:can_manage_members,
+                    can_manage_collections=:can_manage_collections,
+                    can_view_reports=:can_view_reports,
+                    can_manage_settings=:can_manage_settings,
+                    can_manage_roles=:can_manage_roles
+                WHERE id=:id
+            '''), {**payload, 'id': existing[0]})
+        else:
+            conn.execute(sql_insert(role_policies).values(**payload, system_protected=0))
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    return payload
+
+
+def delete_role_policy(role_name: str) -> bool:
+    rn = str(role_name or '').strip().lower()
+    if rn == '':
+        return False
+    with engine.connect() as conn:
+        row = conn.execute(text('SELECT id, system_protected FROM role_policies WHERE LOWER(role)=:r'), {'r': rn}).fetchone()
+        if not row:
+            return False
+        if int(row[1] or 0) == 1:
+            raise ValueError('Cannot delete system-protected role')
+        conn.execute(text('DELETE FROM role_policies WHERE id=:id'), {'id': int(row[0])})
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        return True
 
 
 def migrate_members_collection_only() -> dict:

@@ -28,6 +28,7 @@ export default function App(){
   const [token, setToken] = useState(localStorage.getItem('token') || '')
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')||'null'))
   const [status, setStatus] = useState('')
+  const [rolesCatalog, setRolesCatalog] = useState([])
   const currentUserChurchId = user && user.church != null ? Number(user.church) : null
 
   function canAccessChurch(churchId){
@@ -50,6 +51,8 @@ export default function App(){
   }
   const PASSWORD_HINT = 'Password: minimum 8 characters, include at least 1 letter, 1 number, and 1 special character.'
   function roleLabel(role){
+    const found = (rolesCatalog || []).find(r => String(r.role || '').toLowerCase() === String(role || '').toLowerCase())
+    if(found && found.display_name) return String(found.display_name)
     const map = {
       system_admin: 'System Admin',
       admin: 'Church Admin',
@@ -62,6 +65,12 @@ export default function App(){
   }
 
   function roleOptionsForCurrentUser(){
+    const dynamicRoles = (rolesCatalog || []).map(r => String(r.role || '').toLowerCase()).filter(Boolean)
+    if(dynamicRoles.length){
+      const me = String(user?.role || '').toLowerCase()
+      if(me === 'system_admin') return dynamicRoles
+      return dynamicRoles.filter(r => r !== 'system_admin')
+    }
     const me = String(user?.role || '').toLowerCase()
     if(me === 'system_admin'){
       return ['admin','treasurer','data_steward','uploader','viewer','system_admin']
@@ -76,6 +85,10 @@ export default function App(){
   useEffect(()=>{
     fetchChurches()
   }, [])
+
+  useEffect(()=>{
+    if(user && isAdmin()) fetchRoles()
+  }, [user, token])
 
   // Fetch app_name when user logs in and has a church assigned
   useEffect(()=>{
@@ -101,6 +114,16 @@ export default function App(){
 
   async function fetchChurches(){
     try{ const res = await fetch('http://localhost:8000/churches'); const data = await res.json(); setChurches(data) }catch(e){}
+  }
+
+  async function fetchRoles(){
+    try{
+      const res = await fetch('http://localhost:8000/roles', { headers: authHeaders() })
+      const data = await res.json().catch(()=>[])
+      if(res.ok && Array.isArray(data)) setRolesCatalog(data)
+    }catch(e){
+      // keep fallback hardcoded roles
+    }
   }
 
   async function fetchAppName(){
@@ -141,6 +164,18 @@ export default function App(){
   const [newCodeLabel, setNewCodeLabel] = useState('')
   const [editingCodeId, setEditingCodeId] = useState(null)
   const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:''})
+  const [editingRole, setEditingRole] = useState(null)
+  const [newRole, setNewRole] = useState({
+    role: '',
+    display_name: '',
+    can_view_dashboard: true,
+    can_manage_users: false,
+    can_manage_members: false,
+    can_manage_collections: false,
+    can_view_reports: false,
+    can_manage_settings: false,
+    can_manage_roles: false,
+  })
 
   async function submitAppName(){
     try{
@@ -228,6 +263,76 @@ export default function App(){
         setLocalCollectionCodes(localCodes)
       }
     }catch(e){ /* silently fail */ }
+  }
+
+  async function createRolePolicy(){
+    try{
+      if(String(user?.role || '').toLowerCase() !== 'system_admin'){
+        setStatus('Only system admin can define roles')
+        return
+      }
+      const roleName = String(newRole.role || '').trim().toLowerCase()
+      if(!roleName){ setStatus('Role key is required'); return }
+      const res = await fetch('http://localhost:8000/roles', {
+        method: 'POST',
+        headers: {...authHeaders(), 'Content-Type':'application/json'},
+        body: JSON.stringify({...newRole, role: roleName})
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setStatus('Role created')
+      setNewRole({
+        role: '',
+        display_name: '',
+        can_view_dashboard: true,
+        can_manage_users: false,
+        can_manage_members: false,
+        can_manage_collections: false,
+        can_view_reports: false,
+        can_manage_settings: false,
+        can_manage_roles: false,
+      })
+      await fetchRoles()
+    }catch(e){ setStatus('Create role failed: ' + e.message) }
+  }
+
+  async function saveRolePolicy(){
+    try{
+      if(!editingRole){ return }
+      if(String(user?.role || '').toLowerCase() !== 'system_admin'){
+        setStatus('Only system admin can update roles')
+        return
+      }
+      const roleName = String(editingRole.role || '').trim().toLowerCase()
+      const res = await fetch(`http://localhost:8000/roles/${encodeURIComponent(roleName)}`, {
+        method: 'PUT',
+        headers: {...authHeaders(), 'Content-Type':'application/json'},
+        body: JSON.stringify(editingRole)
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setStatus('Role updated')
+      setEditingRole(null)
+      await fetchRoles()
+    }catch(e){ setStatus('Update role failed: ' + e.message) }
+  }
+
+  async function removeRolePolicy(roleName){
+    try{
+      if(String(user?.role || '').toLowerCase() !== 'system_admin'){
+        setStatus('Only system admin can delete roles')
+        return
+      }
+      if(!window.confirm(`Delete role ${roleName}?`)) return
+      const res = await fetch(`http://localhost:8000/roles/${encodeURIComponent(roleName)}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setStatus('Role deleted')
+      await fetchRoles()
+    }catch(e){ setStatus('Delete role failed: ' + e.message) }
   }
 
   useEffect(()=>{
@@ -739,6 +844,18 @@ export default function App(){
     return new Intl.NumberFormat().format(Number(value))
   }
 
+  function currentRolePolicy(){
+    const role = String(user?.role || '').toLowerCase()
+    return (rolesCatalog || []).find(r => String(r.role || '').toLowerCase() === role) || null
+  }
+
+  function hasRoleRight(flag, fallback=false){
+    if(String(user?.role || '').toLowerCase() === 'system_admin') return true
+    const rp = currentRolePolicy()
+    if(!rp) return fallback
+    return !!rp[flag]
+  }
+
   function displayUserName(u){
     const first = String(u?.first_name || '').trim()
     const last = String(u?.last_name || '').trim()
@@ -824,13 +941,13 @@ export default function App(){
         <aside style={{border:'1px solid #eee',borderRadius:8,padding:10,alignSelf:'start'}}>
           <div style={{fontWeight:700,marginBottom:10}}>Menu</div>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
-            <button onClick={()=>setPage('dashboard')} style={{textAlign:'left',background:page==='dashboard' ? '#e8f0fe' : '#fff'}}>Dashboard</button>
-            <button onClick={()=>setPage('collections')} style={{textAlign:'left',background:page==='collections' ? '#e8f0fe' : '#fff'}}>Collections</button>
-            <button onClick={()=>setPage('members')} style={{textAlign:'left',background:page==='members' ? '#e8f0fe' : '#fff'}}>Members</button>
-            <button onClick={()=>setPage('members_collections')} style={{textAlign:'left',background:page==='members_collections' ? '#e8f0fe' : '#fff'}}>Members Collections</button>
-            <button onClick={()=>setPage('reports')} style={{textAlign:'left',background:page==='reports' ? '#e8f0fe' : '#fff'}}>Reports</button>
-            {isAdmin() && <button onClick={()=>{ setPage('admin'); fetchUsers() }} style={{textAlign:'left',background:page==='admin' ? '#e8f0fe' : '#fff'}}>Admin</button>}
-            {isAdmin() && <button onClick={()=>setPage('settings')} style={{textAlign:'left',background:page==='settings' ? '#e8f0fe' : '#fff'}}>Settings</button>}
+            {hasRoleRight('can_view_dashboard', true) && <button onClick={()=>setPage('dashboard')} style={{textAlign:'left',background:page==='dashboard' ? '#e8f0fe' : '#fff'}}>Dashboard</button>}
+            {hasRoleRight('can_manage_collections', true) && <button onClick={()=>setPage('collections')} style={{textAlign:'left',background:page==='collections' ? '#e8f0fe' : '#fff'}}>Collections</button>}
+            {hasRoleRight('can_manage_members', true) && <button onClick={()=>setPage('members')} style={{textAlign:'left',background:page==='members' ? '#e8f0fe' : '#fff'}}>Members</button>}
+            {hasRoleRight('can_manage_collections', true) && <button onClick={()=>setPage('members_collections')} style={{textAlign:'left',background:page==='members_collections' ? '#e8f0fe' : '#fff'}}>Members Collections</button>}
+            {hasRoleRight('can_view_reports', true) && <button onClick={()=>setPage('reports')} style={{textAlign:'left',background:page==='reports' ? '#e8f0fe' : '#fff'}}>Reports</button>}
+            {hasRoleRight('can_manage_users', isAdmin()) && <button onClick={()=>{ setPage('admin'); fetchUsers() }} style={{textAlign:'left',background:page==='admin' ? '#e8f0fe' : '#fff'}}>Admin</button>}
+            {hasRoleRight('can_manage_settings', isAdmin()) && <button onClick={()=>setPage('settings')} style={{textAlign:'left',background:page==='settings' ? '#e8f0fe' : '#fff'}}>Settings</button>}
           </div>
         </aside>
 
@@ -1012,6 +1129,79 @@ export default function App(){
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+
+            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+              <h4>Role Policy Grid</h4>
+              {String(user?.role || '').toLowerCase() !== 'system_admin' && (
+                <p style={{fontSize:12,color:'#666'}}>Local admin can assign existing roles to local church users but cannot define or update role policies.</p>
+              )}
+
+              {String(user?.role || '').toLowerCase() === 'system_admin' && (
+                <>
+                  <div style={{marginBottom:12,padding:10,border:'1px solid #eee',borderRadius:6}}>
+                    <h5 style={{marginTop:0}}>Add Role</h5>
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                      <input placeholder='role key (e.g. auditor)' value={newRole.role} onChange={e=>setNewRole(prev=>({...prev, role:e.target.value}))} />
+                      <input placeholder='display name' value={newRole.display_name} onChange={e=>setNewRole(prev=>({...prev, display_name:e.target.value}))} />
+                      <label><input type='checkbox' checked={!!newRole.can_view_dashboard} onChange={e=>setNewRole(prev=>({...prev, can_view_dashboard:e.target.checked}))} /> Dashboard</label>
+                      <label><input type='checkbox' checked={!!newRole.can_manage_users} onChange={e=>setNewRole(prev=>({...prev, can_manage_users:e.target.checked}))} /> Users</label>
+                      <label><input type='checkbox' checked={!!newRole.can_manage_members} onChange={e=>setNewRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> Members</label>
+                      <label><input type='checkbox' checked={!!newRole.can_manage_collections} onChange={e=>setNewRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> Collections</label>
+                      <label><input type='checkbox' checked={!!newRole.can_view_reports} onChange={e=>setNewRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> Reports</label>
+                      <label><input type='checkbox' checked={!!newRole.can_manage_settings} onChange={e=>setNewRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> Settings</label>
+                      <button onClick={createRolePolicy}>Add Role</button>
+                    </div>
+                  </div>
+
+                  <div style={{overflow:'auto'}}>
+                    <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
+                      <thead>
+                        <tr>
+                          <th>Role</th>
+                          <th>Display Name</th>
+                          <th>Dashboard</th>
+                          <th>Users</th>
+                          <th>Members</th>
+                          <th>Collections</th>
+                          <th>Reports</th>
+                          <th>Settings</th>
+                          <th>Manage Roles</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(rolesCatalog || []).map(r=> (
+                          <tr key={r.role}>
+                            <td>{r.role}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input value={editingRole.display_name || ''} onChange={e=>setEditingRole(prev=>({...prev, display_name:e.target.value}))} /> : (r.display_name || r.role)}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_view_dashboard} onChange={e=>setEditingRole(prev=>({...prev, can_view_dashboard:e.target.checked}))} /> : (r.can_view_dashboard ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_users} onChange={e=>setEditingRole(prev=>({...prev, can_manage_users:e.target.checked}))} /> : (r.can_manage_users ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_members} onChange={e=>setEditingRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> : (r.can_manage_members ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_collections} onChange={e=>setEditingRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> : (r.can_manage_collections ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_view_reports} onChange={e=>setEditingRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> : (r.can_view_reports ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_settings} onChange={e=>setEditingRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> : (r.can_manage_settings ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_roles} onChange={e=>setEditingRole(prev=>({...prev, can_manage_roles:e.target.checked}))} /> : (r.can_manage_roles ? 'Yes':'No')}</td>
+                            <td>
+                              {editingRole && editingRole.role===r.role ? (
+                                <>
+                                  <button onClick={saveRolePolicy}>Save</button>
+                                  <button style={{marginLeft:6}} onClick={()=>setEditingRole(null)}>Cancel</button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={()=>setEditingRole({...r})}>Edit</button>
+                                  {!r.system_protected && <button style={{marginLeft:6}} onClick={()=>removeRolePolicy(r.role)}>Delete</button>}
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           </div>

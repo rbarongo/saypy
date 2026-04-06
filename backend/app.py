@@ -25,6 +25,10 @@ from .db import (
     get_user_by_token,
     normalize_members_collection_rows,
     compute_members_collection_s1,
+    list_role_policies,
+    role_exists,
+    upsert_role_policy,
+    delete_role_policy,
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import inspect, text
@@ -61,11 +65,15 @@ def _normalize_user_context(user: Optional[dict]) -> Optional[dict]:
         u['role'] = ROLE_SYSTEM_ADMIN
         u['church'] = None
         return u
-    if role not in ALL_ROLES:
+    if not role_exists(role):
         u['role'] = ROLE_UPLOADER
     else:
         u['role'] = role
     return u
+
+
+def _can_manage_roles(user: Optional[dict]) -> bool:
+    return _is_system_admin_user(user)
 
 
 def _is_system_admin_user(user: Optional[dict]) -> bool:
@@ -855,6 +863,104 @@ class SelfPasswordResetIn(BaseModel):
     new_password: str
 
 
+class RolePolicyIn(BaseModel):
+    role: str
+    display_name: Optional[str] = None
+    can_view_dashboard: bool = True
+    can_manage_users: bool = False
+    can_manage_members: bool = False
+    can_manage_collections: bool = False
+    can_view_reports: bool = False
+    can_manage_settings: bool = False
+    can_manage_roles: bool = False
+
+
+@app.get('/roles')
+def get_roles(current_user: dict = Depends(get_current_user)):
+    # Allow admins to fetch assignable roles
+    if not _is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail='Not authorized')
+    try:
+        rows = list_role_policies()
+        if _is_system_admin_user(current_user):
+            return rows
+        # Local admins cannot assign or see system_admin.
+        return [r for r in rows if str(r.get('role') or '').lower() != ROLE_SYSTEM_ADMIN]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/roles')
+def create_role(payload: RolePolicyIn, current_user: dict = Depends(get_current_user)):
+    if not _can_manage_roles(current_user):
+        raise HTTPException(status_code=403, detail='Only system admin can define roles')
+    try:
+        role_name = str(payload.role or '').strip().lower()
+        if role_name == ROLE_SYSTEM_ADMIN:
+            raise HTTPException(status_code=400, detail='system_admin role is reserved')
+        rights = {
+            'can_view_dashboard': payload.can_view_dashboard,
+            'can_manage_users': payload.can_manage_users,
+            'can_manage_members': payload.can_manage_members,
+            'can_manage_collections': payload.can_manage_collections,
+            'can_view_reports': payload.can_view_reports,
+            'can_manage_settings': payload.can_manage_settings,
+            'can_manage_roles': payload.can_manage_roles,
+        }
+        return upsert_role_policy(role_name, payload.display_name, rights)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put('/roles/{role_name}')
+def update_role(role_name: str, payload: RolePolicyIn, current_user: dict = Depends(get_current_user)):
+    if not _can_manage_roles(current_user):
+        raise HTTPException(status_code=403, detail='Only system admin can update roles')
+    try:
+        target = str(role_name or '').strip().lower()
+        if not target:
+            raise HTTPException(status_code=400, detail='role_name is required')
+        if target == ROLE_SYSTEM_ADMIN:
+            raise HTTPException(status_code=400, detail='system_admin role rights cannot be changed')
+        rights = {
+            'can_view_dashboard': payload.can_view_dashboard,
+            'can_manage_users': payload.can_manage_users,
+            'can_manage_members': payload.can_manage_members,
+            'can_manage_collections': payload.can_manage_collections,
+            'can_view_reports': payload.can_view_reports,
+            'can_manage_settings': payload.can_manage_settings,
+            'can_manage_roles': payload.can_manage_roles,
+        }
+        return upsert_role_policy(target, payload.display_name, rights)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete('/roles/{role_name}')
+def remove_role(role_name: str, current_user: dict = Depends(get_current_user)):
+    if not _can_manage_roles(current_user):
+        raise HTTPException(status_code=403, detail='Only system admin can delete roles')
+    try:
+        ok = delete_role_policy(role_name)
+        if not ok:
+            raise HTTPException(status_code=404, detail='Role not found')
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post('/users/register')
 def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     try:
@@ -869,7 +975,7 @@ def register_user(payload: UserRegister, credentials: HTTPAuthorizationCredentia
             raise HTTPException(status_code=403, detail='Only admins can create users')
 
         role = str(payload.role or ROLE_UPLOADER).strip().lower()
-        if role not in ALL_ROLES:
+        if not role_exists(role):
             raise HTTPException(status_code=400, detail='Invalid role')
         if role == ROLE_SYSTEM_ADMIN and creator_role != ROLE_SYSTEM_ADMIN:
             raise HTTPException(status_code=403, detail='Only system admin can assign system_admin role')
@@ -983,7 +1089,7 @@ def update_user(user_id: int, payload: UserRegister, current_user: dict = Depend
         if requested_username != 'saypy_admin' and effective_church is None:
             raise HTTPException(status_code=400, detail='Church is required for all users except saypy_admin')
         next_role = str(payload.role or ROLE_UPLOADER).strip().lower()
-        if next_role not in ALL_ROLES:
+        if not role_exists(next_role):
             raise HTTPException(status_code=400, detail='Invalid role')
         if next_role == ROLE_SYSTEM_ADMIN and role_self != ROLE_SYSTEM_ADMIN:
             raise HTTPException(status_code=403, detail='Only system admin can assign system_admin role')
