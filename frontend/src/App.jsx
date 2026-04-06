@@ -164,6 +164,8 @@ export default function App(){
   const [newCodeLabel, setNewCodeLabel] = useState('')
   const [editingCodeId, setEditingCodeId] = useState(null)
   const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:''})
+  const [showCollectionCodesPanel, setShowCollectionCodesPanel] = useState(false)
+  const [collectionCodesMaxRows, setCollectionCodesMaxRows] = useState(30)
   const [editingRole, setEditingRole] = useState(null)
   const [newRole, setNewRole] = useState({
     role: '',
@@ -342,7 +344,6 @@ export default function App(){
   useEffect(()=>{
     if(page==='settings' && currentUserChurchId){
       setEditingAppName(appName)
-      fetchLocalCodes()
     }
   }, [page, currentUserChurchId])
 
@@ -1124,52 +1125,6 @@ export default function App(){
             </div>
 
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
-              <h4>Local Collection Codes</h4>
-              <p style={{fontSize:12,color:'#666'}}>These codes apply only to your church. Global codes are shared across all churches.</p>
-              
-              <div style={{marginBottom:12}}>
-                <h5>Add New Code</h5>
-                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                  <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Column name (e.g., c21)' disabled={!currentUserChurchId} />
-                  <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Label (e.g., SPECIAL OFFERING)' disabled={!currentUserChurchId} />
-                  <button onClick={createLocalCode} disabled={!currentUserChurchId}>Create Code</button>
-                </div>
-              </div>
-
-              {localCollectionCodes.length > 0 && (
-                <div>
-                  <h5>Your Codes</h5>
-                  <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
-                    <thead><tr><th>Column</th><th>Label</th><th>Actions</th></tr></thead>
-                    <tbody>
-                      {localCollectionCodes.map(code=> (
-                        <tr key={code.id}>
-                          <td>{code.column_name}</td>
-                          <td>{code.code}</td>
-                          <td>
-                            {editingCodeId !== code.id ? (
-                              <>
-                                <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code}); }} style={{marginRight:8}}>Edit</button>
-                                <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>
-                              </>
-                            ) : (
-                              <>
-                                <input type='text' value={editCodeForm.column_name} onChange={e=>setEditCodeForm({...editCodeForm,column_name:e.target.value})} style={{marginRight:4}} />
-                                <input type='text' value={editCodeForm.code} onChange={e=>setEditCodeForm({...editCodeForm,code:e.target.value})} style={{marginRight:4}} />
-                                <button onClick={updateLocalCode} style={{marginRight:4}}>Save</button>
-                                <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:''}); }}>Cancel</button>
-                              </>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
               <h4>Role Policy Grid</h4>
               {String(user?.role || '').toLowerCase() !== 'system_admin' && (
                 <p style={{fontSize:12,color:'#666'}}>Local admin can assign existing roles to local church users but cannot define or update role policies.</p>
@@ -1365,7 +1320,28 @@ export default function App(){
                   ? 'View existing church collection codes, edit them, or add more for your church.' 
                   : 'View existing church collection codes.'}
               </p>
+              <p style={{fontSize:12,color:'#666'}}>These codes apply only to your church. Global codes are shared across all churches. By default, every church gets collection codes from Collection_Codes.xlsx.</p>
               {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,borderRadius:6}}>A church assignment is required to manage collection codes.</div>}
+
+              <div style={{marginBottom:12}}>
+                <button
+                  type='button'
+                  onClick={()=>setShowCollectionCodesPanel(v=>!v)}
+                  style={{background:'none',border:'none',color:'#0a58ca',textDecoration:'underline',cursor:'pointer',padding:0}}
+                >
+                  {showCollectionCodesPanel ? 'Hide collection codes' : 'View collection codes'}
+                </button>
+              </div>
+
+              {showCollectionCodesPanel && (
+                <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <label>Show</label>
+                  <select value={collectionCodesMaxRows} onChange={e=>setCollectionCodesMaxRows(Number(e.target.value))}>
+                    {[10,30,50,100,200].map(n=> <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <span style={{color:'#666'}}>Showing {Math.min(localCollectionCodes.length, collectionCodesMaxRows)} of {localCollectionCodes.length}</span>
+                </div>
+              )}
 
               {hasRoleRight('can_manage_collections', true) && (
                 <div style={{marginBottom:12}}>
@@ -1378,6 +1354,7 @@ export default function App(){
                 </div>
               )}
 
+              {showCollectionCodesPanel && (
               <div>
                 <h5>Existing Codes</h5>
                 {localCollectionCodes.length === 0 ? (
@@ -1386,7 +1363,7 @@ export default function App(){
                   <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
                     <thead><tr><th>Collection Name</th><th>Code</th>{hasRoleRight('can_manage_collections', true) && <th>Actions</th>}</tr></thead>
                     <tbody>
-                      {localCollectionCodes.map(code=> (
+                      {localCollectionCodes.slice(0, collectionCodesMaxRows).map(code=> (
                         <tr key={code.id}>
                           <td>{code.column_name}</td>
                           <td>{code.code}</td>
@@ -1413,6 +1390,7 @@ export default function App(){
                   </table>
                 )}
               </div>
+              )}
             </div>
           </div>
         )}
