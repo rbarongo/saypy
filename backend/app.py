@@ -915,14 +915,13 @@ class RolePolicyIn(BaseModel):
 
 @app.get('/roles')
 def get_roles(current_user: dict = Depends(get_current_user)):
-    # Allow admins to fetch assignable roles
-    if not _is_admin_user(current_user):
-        raise HTTPException(status_code=403, detail='Not authorized')
+    # Allow all authenticated users to fetch role policies for UI rights checks.
+    # Non-system users should not see the system_admin role.
     try:
         rows = list_role_policies()
         if _is_system_admin_user(current_user):
             return rows
-        # Local admins cannot assign or see system_admin.
+        # Non-system users cannot assign or see system_admin.
         return [r for r in rows if str(r.get('role') or '').lower() != ROLE_SYSTEM_ADMIN]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

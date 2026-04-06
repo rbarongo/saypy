@@ -848,12 +848,28 @@ def ensure_role_policies_schema():
     expected = {
         'can_manage_members_collections': 'INTEGER',
     }
+    added_cols = []
     for col, typ in expected.items():
         if col in existing:
             continue
         stmt = f'ALTER TABLE role_policies ADD COLUMN {col} {typ} DEFAULT 0'
         with engine.connect() as conn:
             conn.execute(text(stmt))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        added_cols.append(col)
+
+    # Backfill intended defaults for built-in roles only when the column is introduced
+    # on an existing installation. This avoids overriding later manual role edits.
+    if 'can_manage_members_collections' in added_cols:
+        with engine.connect() as conn:
+            conn.execute(text('''
+                UPDATE role_policies
+                SET can_manage_members_collections = 1
+                WHERE LOWER(role) IN ('system_admin', 'admin', 'treasurer', 'data_steward', 'uploader', 'viewer')
+            '''))
             try:
                 conn.commit()
             except Exception:

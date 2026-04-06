@@ -87,7 +87,7 @@ export default function App(){
   }, [])
 
   useEffect(()=>{
-    if(user && isAdmin()) fetchRoles()
+    if(user) fetchRoles()
   }, [user, token])
 
   // Fetch app_name when user logs in and has a church assigned
