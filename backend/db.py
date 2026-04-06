@@ -2,6 +2,8 @@ import os
 import hashlib
 import binascii
 import uuid
+import zipfile
+import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus
 from datetime import datetime, timedelta
 from typing import List
@@ -429,6 +431,7 @@ collection_codes = Table(
     Column('id', Integer, primary_key=True, autoincrement=True),
     Column('column_name', String(100), nullable=False),  # Removed unique constraint to allow per-church codes
     Column('code', String(400), nullable=True),
+    Column('custom_collection_name', String(400), nullable=True),
     Column('church', Integer, ForeignKey('church.id'), nullable=True),  # NULL = global code, value = church-specific code
 )
 
@@ -516,6 +519,10 @@ def create_tables():
         ensure_role_policies_schema()
     except Exception:
         pass
+    try:
+        ensure_collection_codes_schema()
+    except Exception:
+        pass
     # Ensure any new columns are present on existing tables (simple ALTER TABLE add column migration)
     try:
         ensure_members_collection_schema()
@@ -551,10 +558,6 @@ def create_tables():
         pass
 
     try:
-        seed_collection_codes()
-    except Exception:
-        pass
-    try:
         seed_role_policies()
     except Exception:
         pass
@@ -562,6 +565,192 @@ def create_tables():
         seed_churches()
     except Exception:
         pass
+    try:
+        import_collection_codes_from_workbook()
+    except Exception:
+        pass
+
+
+def _xlsx_read_collection_codes_rows(xlsx_path: str) -> List[dict]:
+    """Read Collection_Codes.xlsx rows as dicts using stdlib XML parsing.
+
+    Expected headers in first row: COLUMN_NAME, CODE, ID, CHURCH.
+    Business mapping (as requested):
+    - COLUMN_NAME -> collection name (db column_name)
+    - CODE -> code (db code)
+    """
+    if not os.path.exists(xlsx_path):
+        return []
+
+    def _col_letters(ref: str) -> str:
+        out = []
+        for ch in str(ref):
+            if ch.isalpha():
+                out.append(ch)
+            else:
+                break
+        return ''.join(out)
+
+    rows_out: List[dict] = []
+    ns_main = {'x': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+
+    with zipfile.ZipFile(xlsx_path, 'r') as zf:
+        shared_strings = []
+        if 'xl/sharedStrings.xml' in zf.namelist():
+            ss_root = ET.fromstring(zf.read('xl/sharedStrings.xml'))
+            for si in ss_root.findall('.//x:si', ns_main):
+                parts = [t.text or '' for t in si.findall('.//x:t', ns_main)]
+                shared_strings.append(''.join(parts))
+
+        sheet_xml = 'xl/worksheets/sheet1.xml'
+        if sheet_xml not in zf.namelist():
+            return []
+
+        root = ET.fromstring(zf.read(sheet_xml))
+        sheet_data = root.find('x:sheetData', ns_main)
+        if sheet_data is None:
+            return []
+
+        header_map = {}
+        for row in sheet_data.findall('x:row', ns_main):
+            r_idx = int(row.attrib.get('r', '0') or '0')
+            cells = {}
+            for c in row.findall('x:c', ns_main):
+                ref = c.attrib.get('r', '')
+                col = _col_letters(ref)
+                c_type = c.attrib.get('t', '')
+                v = c.find('x:v', ns_main)
+                if c_type == 's' and v is not None and v.text is not None:
+                    try:
+                        idx = int(v.text)
+                        value = shared_strings[idx] if 0 <= idx < len(shared_strings) else ''
+                    except Exception:
+                        value = ''
+                elif c_type == 'inlineStr':
+                    t = c.find('x:is/x:t', ns_main)
+                    value = t.text if t is not None and t.text is not None else ''
+                else:
+                    value = v.text if v is not None and v.text is not None else ''
+                cells[col] = str(value).strip()
+
+            if r_idx == 1:
+                for col, val in cells.items():
+                    hv = str(val or '').strip().upper()
+                    if hv:
+                        header_map[col] = hv
+                continue
+
+            if not cells:
+                continue
+
+            row_dict = {}
+            for col, hv in header_map.items():
+                row_dict[hv] = cells.get(col, '').strip()
+
+            collection_name = str(row_dict.get('COLUMN_NAME') or '').strip()
+            code_value = str(row_dict.get('CODE') or '').strip()
+            church_raw = str(row_dict.get('CHURCH') or '').strip()
+            if not collection_name or not code_value:
+                continue
+            church_id = None
+            if church_raw:
+                try:
+                    church_id = int(float(church_raw))
+                except Exception:
+                    church_id = None
+            rows_out.append({
+                'column_name': collection_name,
+                'code': code_value,
+                'church': church_id,
+                'custom_collection_name': None,
+            })
+
+    return rows_out
+
+
+def import_collection_codes_from_workbook(workbook_path: Optional[str] = None) -> dict:
+    """Import default collection codes from Collection_Codes.xlsx for every church.
+
+    Workbook is treated as template rows. Defaults are materialized per church id.
+    Upserts by (church, column_name) so repeated startup runs are idempotent.
+    """
+    ensure_db_exists()
+    inspector = inspect(engine)
+    if 'collection_codes' not in inspector.get_table_names():
+        return {'ok': False, 'reason': 'collection_codes table missing', 'inserted': 0, 'updated': 0}
+
+    xlsx_path = workbook_path or os.path.abspath(os.path.join(BASE_DIR, '..', 'Collection_Codes.xlsx'))
+    template_rows = _xlsx_read_collection_codes_rows(xlsx_path)
+    if not template_rows:
+        return {'ok': False, 'reason': 'workbook missing or empty', 'path': xlsx_path, 'inserted': 0, 'updated': 0}
+
+    with engine.connect() as conn:
+        church_rows = conn.execute(text('SELECT id FROM church ORDER BY id')).fetchall()
+    church_ids = [int(r[0]) for r in church_rows if r and r[0] is not None]
+    if not church_ids:
+        return {'ok': False, 'reason': 'no churches found', 'path': xlsx_path, 'inserted': 0, 'updated': 0}
+
+    # Use workbook rows as defaults regardless of the source church id in workbook.
+    rows = []
+    for ch_id in church_ids:
+        for item in template_rows:
+            rows.append({
+                'column_name': item['column_name'],
+                'code': item['code'],
+                'custom_collection_name': item.get('custom_collection_name'),
+                'church': ch_id,
+            })
+
+    inserted = 0
+    updated = 0
+    with engine.connect() as conn:
+        for item in rows:
+            existing = conn.execute(
+                text('SELECT id, code, custom_collection_name FROM collection_codes WHERE church=:ch AND LOWER(column_name)=LOWER(:cn) LIMIT 1'),
+                {'ch': item['church'], 'cn': item['column_name']}
+            ).fetchone()
+            if existing:
+                current_code = str(existing[1] or '').strip()
+                new_code = str(item['code'] or '').strip()
+                current_custom = str(existing[2] or '').strip()
+                new_custom = str(item.get('custom_collection_name') or '').strip()
+                if current_code != new_code or current_custom != new_custom:
+                    conn.execute(
+                        text('UPDATE collection_codes SET code=:code, custom_collection_name=:ccn WHERE id=:id'),
+                        {'code': new_code, 'ccn': (new_custom or None), 'id': int(existing[0])}
+                    )
+                    updated += 1
+            else:
+                conn.execute(sql_insert(collection_codes).values(**item))
+                inserted += 1
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+    return {'ok': True, 'path': xlsx_path, 'rows': len(rows), 'churches': len(church_ids), 'inserted': inserted, 'updated': updated}
+
+
+def ensure_collection_codes_schema():
+    """Ensure collection_codes has church and custom_collection_name columns."""
+    inspector = inspect(engine)
+    if 'collection_codes' not in inspector.get_table_names():
+        return
+    existing = {c['name'] for c in inspector.get_columns('collection_codes')}
+    expected = {
+        'church': 'INTEGER',
+        'custom_collection_name': 'TEXT',
+    }
+    for col, typ in expected.items():
+        if col in existing:
+            continue
+        stmt = f'ALTER TABLE collection_codes ADD COLUMN {col} {typ}'
+        with engine.connect() as conn:
+            conn.execute(text(stmt))
+            try:
+                conn.commit()
+            except Exception:
+                pass
 
 
 def seed_role_policies():

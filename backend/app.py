@@ -29,6 +29,7 @@ from .db import (
     role_exists,
     upsert_role_policy,
     delete_role_policy,
+    import_collection_codes_from_workbook,
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import inspect, text
@@ -653,22 +654,20 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
 
 @app.get('/collection_codes')
 def list_collection_codes(current_user: dict = Depends(get_current_user)):
-    """List collection codes: global codes + church-specific codes for user's church."""
+    """List collection codes scoped by church.
+
+    - System admin: sees all church-scoped codes.
+    - Non-system users: see only their church codes.
+    """
     try:
         church_id = current_user.get('church')
-        
-        # Build query to get global codes + user's church-specific codes
-        query = 'SELECT * FROM collection_codes WHERE church IS NULL'
+        role = str(current_user.get('role') or '').lower()
         params = {}
-        if church_id:
-            # Add church-specific codes for this church
-            query += ' OR church = :church_id'
-            params['church_id'] = church_id
+        if role == ROLE_SYSTEM_ADMIN:
+            query = 'SELECT * FROM collection_codes WHERE church IS NOT NULL ORDER BY church, id'
         else:
-            # System admin sees all global codes (no local codes)
-            pass
-        
-        query += ' ORDER BY id'
+            query = 'SELECT * FROM collection_codes WHERE church = :church_id ORDER BY id'
+            params['church_id'] = church_id
         
         with engine.connect() as conn:
             result = conn.execute(text(query), params)
@@ -800,10 +799,16 @@ def validate_members_collections(rows: List[dict], auth: dict = Depends(require_
 class CollectionCodeIn(BaseModel):
     column_name: str
     code: str | None = None
+    custom_collection_name: str | None = None
 
 
 class AppNameIn(BaseModel):
     app_name: str
+
+
+class ChurchCreateIn(BaseModel):
+    name: str
+    app_name: Optional[str] = None
 
 
 @app.post('/collection_codes')
@@ -811,7 +816,13 @@ def create_collection_code(payload: CollectionCodeIn, auth: dict = Depends(requi
     try:
         _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}, context='collection code creation')
         with engine.connect() as conn:
-            res = conn.execute(text("INSERT INTO collection_codes (column_name, code) VALUES (:cn, :c)"), {"cn": payload.column_name, "c": payload.code})
+            actor_church = _auth_context_church(auth)
+            if actor_church is None:
+                raise HTTPException(status_code=400, detail='church is required for collection code creation')
+            conn.execute(
+                text("INSERT INTO collection_codes (column_name, code, custom_collection_name, church) VALUES (:cn, :c, :ccn, :ch)"),
+                {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "ch": actor_church}
+            )
             try:
                 conn.commit()
             except Exception:
@@ -1178,6 +1189,42 @@ def list_churches():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post('/churches')
+def create_church(payload: ChurchCreateIn, current_user: dict = Depends(get_current_user)):
+    """Create a new church and apply default collection codes from Collection_Codes.xlsx."""
+    try:
+        if not _is_system_admin_user(current_user):
+            raise HTTPException(status_code=403, detail='Only system admin can create churches')
+
+        name = str(payload.name or '').strip()
+        if not name:
+            raise HTTPException(status_code=400, detail='Church name is required')
+        app_name = str(payload.app_name or '').strip() or 'Church Offerings \u2014 Admin Console'
+
+        with engine.connect() as conn:
+            existing = conn.execute(text('SELECT id FROM church WHERE LOWER(name)=LOWER(:n)'), {'n': name}).fetchone()
+            if existing:
+                raise HTTPException(status_code=400, detail='Church already exists')
+            conn.execute(text('INSERT INTO church (name, app_name) VALUES (:n, :a)'), {'n': name, 'a': app_name})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+            created = conn.execute(text('SELECT id, name, app_name FROM church WHERE LOWER(name)=LOWER(:n)'), {'n': name}).fetchone()
+
+        # Ensure default church-scoped codes are present for the newly created church.
+        import_collection_codes_from_workbook()
+
+        if not created:
+            raise HTTPException(status_code=500, detail='Failed to create church')
+        return {'ok': True, 'church': {'id': created[0], 'name': created[1], 'app_name': created[2]}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get('/churches/{church_id}')
 def get_church(church_id: int, current_user: dict = Depends(get_current_user)):
     """Get church details including app_name."""
@@ -1265,8 +1312,8 @@ def create_church_collection_code(church_id: int, payload: CollectionCodeIn, cur
             raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
         
         with engine.connect() as conn:
-            conn.execute(text("INSERT INTO collection_codes (column_name, code, church) VALUES (:cn, :c, :ch)"), 
-                        {"cn": payload.column_name, "c": payload.code, "ch": church_id})
+            conn.execute(text("INSERT INTO collection_codes (column_name, code, custom_collection_name, church) VALUES (:cn, :c, :ccn, :ch)"), 
+                        {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "ch": church_id})
             try:
                 conn.commit()
             except Exception:
@@ -1297,8 +1344,8 @@ def update_church_collection_code(church_id: int, code_id: int, payload: Collect
             if not row or row[0] != church_id:
                 raise HTTPException(status_code=404, detail='Code not found or does not belong to this church')
             
-            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c WHERE id=:id"), 
-                        {"cn": payload.column_name, "c": payload.code, "id": code_id})
+            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c, custom_collection_name=:ccn WHERE id=:id"), 
+                        {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "id": code_id})
             try:
                 conn.commit()
             except Exception:
@@ -1346,7 +1393,7 @@ def delete_church_collection_code(church_id: int, code_id: int, current_user: di
 def update_collection_code(code_id: int, payload: CollectionCodeIn):
     try:
         with engine.connect() as conn:
-            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c WHERE id=:id"), {"cn": payload.column_name, "c": payload.code, "id": code_id})
+            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c, custom_collection_name=:ccn WHERE id=:id"), {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "id": code_id})
             try:
                 conn.commit()
             except Exception:
