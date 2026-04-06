@@ -24,7 +24,7 @@ if(typeof window !== 'undefined' && !window.__saypyFetchPatched){
 
 // Single-file frontend with Login, RBAC, and pages for Admin/Members/Collections/Reports
 export default function App(){
-  const [page, setPage] = useState('collections') // default landing
+  const [page, setPage] = useState('dashboard') // default landing
   const [token, setToken] = useState(localStorage.getItem('token') || '')
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')||'null'))
   const [status, setStatus] = useState('')
@@ -128,7 +128,7 @@ export default function App(){
       setToken(data.token)
       setUser(data.user)
       setStatus('Logged in')
-      setPage('collections')
+      setPage('dashboard')
     }catch(e){ setStatus('Login failed: '+e.message) }
   }
   function logout(){ setToken(''); setUser(null); setStatus('Logged out'); }
@@ -662,6 +662,34 @@ export default function App(){
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
   const [aggRows, setAggRows] = useState([])
+  const [dashboardStats, setDashboardStats] = useState({ members: null, users: null, loading: false })
+
+  async function fetchDashboardStats(){
+    setDashboardStats(prev => ({ ...prev, loading: true }))
+    try{
+      const [membersRes, usersRes] = await Promise.all([
+        authFetch('http://localhost:8000/members'),
+        authFetch('http://localhost:8000/users'),
+      ])
+
+      const membersData = await membersRes.json().catch(()=>[])
+      const usersData = await usersRes.json().catch(()=>[])
+
+      setDashboardStats({
+        members: Array.isArray(membersData) ? membersData.length : 0,
+        users: usersRes.ok && Array.isArray(usersData) ? usersData.length : null,
+        loading: false,
+      })
+    }catch(e){
+      setDashboardStats({ members: null, users: null, loading: false })
+      setStatus('Failed to load dashboard: ' + e.message)
+    }
+  }
+
+  useEffect(()=>{
+    if(user && page === 'dashboard') fetchDashboardStats()
+  }, [page, user, token])
+
   async function fetchMembersCollectionReport(){
     try{
       let url = 'http://localhost:8000/reports/members_collections';
@@ -738,17 +766,37 @@ export default function App(){
         </div>
       )}
 
-      <nav style={{marginTop:12, marginBottom:12}}>
-        <button onClick={()=>setPage('collections')}>Collections</button>
-        <button onClick={()=>setPage('members')}>Members</button>
-        <button onClick={()=>setPage('members_collections')}>Members Collections</button>
-        <button onClick={()=>setPage('reports')}>Reports</button>
-        {isAdmin() && <button onClick={()=>{ setPage('admin'); fetchUsers() }}>Admin</button>}
-        {isAdmin() && <button onClick={()=>setPage('settings')}>Settings</button>}
-        <span style={{marginLeft:12,color:'#666'}}>{status}</span>
-      </nav>
+      <div style={{display:'grid',gridTemplateColumns:'220px 1fr',gap:16,marginTop:12}}>
+        <aside style={{border:'1px solid #eee',borderRadius:8,padding:10,alignSelf:'start'}}>
+          <div style={{fontWeight:700,marginBottom:10}}>Menu</div>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <button onClick={()=>setPage('dashboard')} style={{textAlign:'left',background:page==='dashboard' ? '#e8f0fe' : '#fff'}}>Dashboard</button>
+            <button onClick={()=>setPage('collections')} style={{textAlign:'left',background:page==='collections' ? '#e8f0fe' : '#fff'}}>Collections</button>
+            <button onClick={()=>setPage('members')} style={{textAlign:'left',background:page==='members' ? '#e8f0fe' : '#fff'}}>Members</button>
+            <button onClick={()=>setPage('members_collections')} style={{textAlign:'left',background:page==='members_collections' ? '#e8f0fe' : '#fff'}}>Members Collections</button>
+            <button onClick={()=>setPage('reports')} style={{textAlign:'left',background:page==='reports' ? '#e8f0fe' : '#fff'}}>Reports</button>
+            {isAdmin() && <button onClick={()=>{ setPage('admin'); fetchUsers() }} style={{textAlign:'left',background:page==='admin' ? '#e8f0fe' : '#fff'}}>Admin</button>}
+            {isAdmin() && <button onClick={()=>setPage('settings')} style={{textAlign:'left',background:page==='settings' ? '#e8f0fe' : '#fff'}}>Settings</button>}
+          </div>
+        </aside>
 
-      <main style={{borderTop:'1px solid #eee', paddingTop:12}}>
+        <main style={{borderTop:'1px solid #eee', paddingTop:12}}>
+          <div style={{marginBottom:12,color:'#666'}}>{status}</div>
+        {page==='dashboard' && (
+          <div>
+            <h3>Dashboard</h3>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',gap:12}}>
+              <div style={{border:'1px solid #ddd',borderRadius:10,padding:16,background:'#fafafa'}}>
+                <div style={{fontSize:12,color:'#666'}}>Total Members</div>
+                <div style={{fontSize:28,fontWeight:700,marginTop:6}}>{dashboardStats.loading ? '...' : (dashboardStats.members ?? '-')}</div>
+              </div>
+              <div style={{border:'1px solid #ddd',borderRadius:10,padding:16,background:'#fafafa'}}>
+                <div style={{fontSize:12,color:'#666'}}>Total Users</div>
+                <div style={{fontSize:28,fontWeight:700,marginTop:6}}>{dashboardStats.loading ? '...' : (dashboardStats.users ?? '-')}</div>
+              </div>
+            </div>
+          </div>
+        )}
         {page==='admin' && (
           <div>
             <h3>Admin — Manage Users</h3>
@@ -1279,7 +1327,8 @@ export default function App(){
               )}
           </div>
         )}
-      </main>
+        </main>
+      </div>
     </div>
   )
 }
