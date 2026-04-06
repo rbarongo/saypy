@@ -335,6 +335,7 @@ church = Table(
     'church', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
     Column('name', String(200), nullable=False, unique=True),
+    Column('app_name', String(300), nullable=True),  # Custom application name for local admin
 )
 
 members_collection = Table(
@@ -426,8 +427,9 @@ members_collection = Table(
 collection_codes = Table(
     'collection_codes', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('column_name', String(100), nullable=False, unique=True),
+    Column('column_name', String(100), nullable=False),  # Removed unique constraint to allow per-church codes
     Column('code', String(400), nullable=True),
+    Column('church', Integer, ForeignKey('church.id'), nullable=True),  # NULL = global code, value = church-specific code
 )
 
 
@@ -839,11 +841,11 @@ def seed_collection_codes():
     for idx, label in enumerate(l_labels, start=1):
         mapping.append((f'l{idx}', label))
 
-    # Insert mapping
+    # Insert mapping (all global codes with church=NULL)
     with engine.connect() as conn:
         for idx, (col, code) in enumerate(mapping, start=1):
             try:
-                conn.execute(sql_insert(collection_codes).values(column_name=col, code=code))
+                conn.execute(sql_insert(collection_codes).values(column_name=col, code=code, church=None))
             except Exception:
                 pass
         try:
@@ -1100,12 +1102,12 @@ def seed_churches():
             cnt = row[0] if row else 0
         if cnt and int(cnt) > 0:
             return
-        # seed values
+        # seed values with default app_name = church name
         vals = [
-            {'name': 'Kibada'},
-            {'name': 'KCC'},
-            {'name': 'Mwera'},
-            {'name': 'Goroka'},
+            {'name': 'Kibada', 'app_name': 'Church Offerings — Admin Console'},
+            {'name': 'KCC', 'app_name': 'Church Offerings — Admin Console'},
+            {'name': 'Mwera', 'app_name': 'Church Offerings — Admin Console'},
+            {'name': 'Goroka', 'app_name': 'Church Offerings — Admin Console'},
         ]
         for v in vals:
             try:

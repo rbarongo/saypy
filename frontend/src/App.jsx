@@ -145,17 +145,24 @@ export default function App(){
   async function submitAppName(){
     try{
       if(!currentUserChurchId){ setStatus('Error: Unable to determine church'); return }
-      const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/app_name`, {
+      const url = `http://localhost:8000/churches/${currentUserChurchId}/app_name`
+      console.log('Updating app_name at:', url, 'with:', {app_name: editingAppName})
+      const res = await fetch(url, {
         method: 'PUT',
         headers: {...authHeaders(), 'Content-Type':'application/json'},
         body: JSON.stringify({app_name: editingAppName})
       })
+      console.log('Response status:', res.status, res.statusText)
       const data = await res.json().catch(()=>({}))
+      console.log('Response data:', data)
       if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
       setAppName(editingAppName)
       setShowEditAppName(false)
       setStatus('App name updated successfully')
-    }catch(e){ setStatus('Update app name failed: '+e.message) }
+    }catch(e){ 
+      console.error('submitAppName error:', e)
+      setStatus('Update app name failed: '+e.message) 
+    }
   }
 
   async function createLocalCode(){
@@ -824,13 +831,14 @@ export default function App(){
         {page==='settings' && (
           <div>
             <h3>Settings</h3>
+            {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,marginBottom:12,borderRadius:6}}>⚠️ You do not have a church assigned. Only local church admins can access settings.</div>}
             
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
               <h4>Application Name</h4>
               {!showEditAppName ? (
                 <div>
                   <p><strong>Current:</strong> {appName}</p>
-                  <button onClick={()=>{ setEditingAppName(appName); setShowEditAppName(true); }}>Edit</button>
+                  <button onClick={()=>{ setEditingAppName(appName); setShowEditAppName(true); }} disabled={!currentUserChurchId}>Edit</button>
                 </div>
               ) : (
                 <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
@@ -848,9 +856,9 @@ export default function App(){
               <div style={{marginBottom:12}}>
                 <h5>Add New Code</h5>
                 <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                  <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Column name (e.g., c21)' />
-                  <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Label (e.g., SPECIAL OFFERING)' />
-                  <button onClick={createLocalCode}>Create Code</button>
+                  <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Column name (e.g., c21)' disabled={!currentUserChurchId} />
+                  <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Label (e.g., SPECIAL OFFERING)' disabled={!currentUserChurchId} />
+                  <button onClick={createLocalCode} disabled={!currentUserChurchId}>Create Code</button>
                 </div>
               </div>
 

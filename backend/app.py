@@ -601,12 +601,30 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
 
 
 @app.get('/collection_codes')
-def list_collection_codes():
+def list_collection_codes(current_user: dict = Depends(get_current_user)):
+    """List collection codes: global codes + church-specific codes for user's church."""
     try:
-        df = pd.read_sql_table('collection_codes', con=engine)
-        rows = df.to_dict(orient='records')
-        out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
-        return out
+        church_id = current_user.get('church')
+        
+        # Build query to get global codes + user's church-specific codes
+        query = 'SELECT * FROM collection_codes WHERE church IS NULL'
+        params = {}
+        if church_id:
+            # Add church-specific codes for this church
+            query += ' OR church = :church_id'
+            params['church_id'] = church_id
+        else:
+            # System admin sees all global codes (no local codes)
+            pass
+        
+        query += ' ORDER BY id'
+        
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params)
+            rows = result.fetchall()
+            out = [dict(row) for row in rows]
+        
+        return [{k: _serializable_value(v) for k, v in r.items()} for r in out]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -731,6 +749,10 @@ def validate_members_collections(rows: List[dict], auth: dict = Depends(require_
 class CollectionCodeIn(BaseModel):
     column_name: str
     code: str | None = None
+
+
+class AppNameIn(BaseModel):
+    app_name: str
 
 
 @app.post('/collection_codes')
@@ -1003,6 +1025,170 @@ def list_churches():
         return df.to_dict(orient='records')
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/churches/{church_id}')
+def get_church(church_id: int, current_user: dict = Depends(get_current_user)):
+    """Get church details including app_name."""
+    try:
+        # Check if user can access this church
+        user_church = current_user.get('church')
+        user_role = current_user.get('role')
+        if user_role != ROLE_SYSTEM_ADMIN and user_church != church_id:
+            raise HTTPException(status_code=403, detail='You do not have access to this church')
+        
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT id, name, app_name FROM church WHERE id = :id'), {'id': church_id})
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Church not found')
+            return dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/churches/{church_id}/app_name')
+def get_church_app_name(church_id: int, current_user: dict = Depends(get_current_user)):
+    """Get the application name for a church."""
+    try:
+        # Check if user can access this church
+        user_church = current_user.get('church')
+        user_role = current_user.get('role')
+        if user_role != ROLE_SYSTEM_ADMIN and user_church != church_id:
+            raise HTTPException(status_code=403, detail='You do not have access to this church')
+        
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT app_name FROM church WHERE id = :id'), {'id': church_id})
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Church not found')
+            app_name = row[0] if row[0] else 'Church Offerings \u2014 Admin Console'
+            return {'app_name': app_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put('/churches/{church_id}/app_name')
+def update_church_app_name(church_id: int, payload: AppNameIn, current_user: dict = Depends(get_current_user)):
+    """Update the application name for a church (admin only)."""
+    try:
+        # Check if user is admin for this church
+        user_church = current_user.get('church')
+        user_role = current_user.get('role')
+        if user_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Only admins can update church settings')
+        if user_role == ROLE_ADMIN and user_church != church_id:
+            raise HTTPException(status_code=403, detail='You can only update your own church')
+        
+        app_name = str(payload.app_name or '').strip()
+        if not app_name:
+            raise HTTPException(status_code=400, detail='app_name is required')
+        
+        with engine.connect() as conn:
+            conn.execute(text('UPDATE church SET app_name = :name WHERE id = :id'), {'name': app_name, 'id': church_id})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/churches/{church_id}/collection_codes')
+def create_church_collection_code(church_id: int, payload: CollectionCodeIn, current_user: dict = Depends(get_current_user)):
+    """Create a church-specific collection code (admin only)."""
+    try:
+        # Check if user is admin for this church
+        user_church = current_user.get('church')
+        user_role = current_user.get('role')
+        if user_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Only admins can create collection codes')
+        if user_role == ROLE_ADMIN and user_church != church_id:
+            raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
+        
+        with engine.connect() as conn:
+            conn.execute(text("INSERT INTO collection_codes (column_name, code, church) VALUES (:cn, :c, :ch)"), 
+                        {"cn": payload.column_name, "c": payload.code, "ch": church_id})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put('/churches/{church_id}/collection_codes/{code_id}')
+def update_church_collection_code(church_id: int, code_id: int, payload: CollectionCodeIn, current_user: dict = Depends(get_current_user)):
+    """Update a church-specific collection code (admin only)."""
+    try:
+        # Check if user is admin for this church
+        user_church = current_user.get('church')
+        user_role = current_user.get('role')
+        if user_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Only admins can update collection codes')
+        if user_role == ROLE_ADMIN and user_church != church_id:
+            raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
+        
+        # Verify code belongs to this church
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT church FROM collection_codes WHERE id = :id"), {"id": code_id})
+            row = result.fetchone()
+            if not row or row[0] != church_id:
+                raise HTTPException(status_code=404, detail='Code not found or does not belong to this church')
+            
+            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c WHERE id=:id"), 
+                        {"cn": payload.column_name, "c": payload.code, "id": code_id})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete('/churches/{church_id}/collection_codes/{code_id}')
+def delete_church_collection_code(church_id: int, code_id: int, current_user: dict = Depends(get_current_user)):
+    """Delete a church-specific collection code (admin only)."""
+    try:
+        # Check if user is admin for this church
+        user_church = current_user.get('church')
+        user_role = current_user.get('role')
+        if user_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
+            raise HTTPException(status_code=403, detail='Only admins can delete collection codes')
+        if user_role == ROLE_ADMIN and user_church != church_id:
+            raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
+        
+        # Verify code belongs to this church
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT church FROM collection_codes WHERE id = :id"), {"id": code_id})
+            row = result.fetchone()
+            if not row or row[0] != church_id:
+                raise HTTPException(status_code=404, detail='Code not found or does not belong to this church')
+            
+            conn.execute(text("DELETE FROM collection_codes WHERE id = :id"), {"id": code_id})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.put('/collection_codes/{code_id}')
