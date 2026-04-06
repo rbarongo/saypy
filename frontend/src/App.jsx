@@ -639,7 +639,13 @@ export default function App(){
   }
 
   async function fetchCodes(){ try{ const res = await fetch('http://localhost:8000/collection_codes'); const data = await res.json(); setCollectionCodes(data) }catch(e){} }
-  async function fetchMembersLocal(){ try{ const res = await fetch('http://localhost:8000/members'); const data = await res.json(); setMembersLocal(data) }catch(e){} }
+  async function fetchMembersLocal(){
+    try{
+      const res = await authFetch('http://localhost:8000/members')
+      const data = await res.json()
+      if(res.ok) setMembersLocal(data)
+    }catch(e){}
+  }
 
   async function fetchMembersCollections(){
     try{
@@ -675,7 +681,7 @@ export default function App(){
       const name = r.s4 || r.s4 || r['s4'] || '';
       if(!name){ updated.push({...r, __verified:false, __suggestions: []}); continue }
       try{
-        const res = await fetch(`http://localhost:8000/members?q=${encodeURIComponent(name)}`)
+        const res = await authFetch(`http://localhost:8000/members?q=${encodeURIComponent(name)}`)
         const cand = await res.json();
         const scored = (Array.isArray(cand)? cand: []).map(c=> ({...c, _score: levenshtein(name, c.MEMBER_NAME || c.MEMBER_NAME || '')})).sort((a,b)=> a._score - b._score).slice(0,6)
         const verified = scored.length>0 && scored[0]._score <= Math.max(2, Math.floor((name.length||1)*0.25));

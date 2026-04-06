@@ -140,6 +140,14 @@ def _require_auth_right(auth: dict, right_flag: str, context: str = 'this operat
     raise HTTPException(status_code=403, detail=f'Not authorized for {context}')
 
 
+def _require_auth_any_right(auth: dict, right_flags: set, context: str = 'this operation'):
+    role = _auth_role(auth)
+    for flag in right_flags:
+        if _role_has_right(role, flag):
+            return
+    raise HTTPException(status_code=403, detail=f'Not authorized for {context}')
+
+
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing or invalid authorization token")
@@ -1346,7 +1354,11 @@ def update_collection_code(code_id: int, payload: CollectionCodeIn):
 @app.get('/members')
 def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     try:
-        _require_auth_right(auth, 'can_manage_members', context='members listing')
+        _require_auth_any_right(
+            auth,
+            {'can_manage_members', 'can_manage_collections', 'can_manage_members_collections'},
+            context='members listing'
+        )
         df = pd.read_sql_table('members', con=engine)
         actor_church = _auth_context_church(auth)
         if actor_church is not None and 'church' in df.columns:
