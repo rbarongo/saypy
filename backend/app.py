@@ -126,7 +126,13 @@ def _role_has_right(role: Optional[str], right_flag: str) -> bool:
         for rp in list_role_policies():
             if str(rp.get('role') or '').strip().lower() == r:
                 if right_flag in rp:
-                    return bool(rp.get(right_flag))
+                    if bool(rp.get(right_flag)):
+                        return True
+                    # Compatibility guard: if a built-in protected role row was migrated
+                    # with an incorrect 0 for a known default right, keep expected access.
+                    if bool(rp.get('system_protected')) and r in fallback.get(right_flag, set()):
+                        return True
+                    return False
                 break
     except Exception:
         pass

@@ -563,8 +563,7 @@ export default function App(){
     if(page==='members_collections'){
       setStatus('Loading collections...')
       fetchMembersCollections().then(()=>{
-        setStatus('')
-        if(!membersCollections || membersCollections.length===0) setStatus('No collection rows found')
+        // Keep error/status set by fetchMembersCollections when request fails.
       }).catch(()=>{})
     }
   }, [page])
@@ -651,16 +650,31 @@ export default function App(){
     try{
       const res = await authFetch('http://localhost:8000/reports/members_collections')
       const data = await res.json()
-      if(!res.ok){ setStatus('Failed to load collections: '+(data.detail||JSON.stringify(data))); setMembersCollections([]); return }
+      if(!res.ok){
+        const msg = String(data?.detail || JSON.stringify(data) || 'Request failed')
+        if(res.status === 403){
+          setStatus('Not authorized for Members Collections. Ask admin to enable Members Collections right for your role.')
+        }else{
+          setStatus('Failed to load collections: ' + msg)
+        }
+        setMembersCollections([])
+        return false
+      }
       // attach helper metadata per row (verified flag and suggestions)
       const enriched = (Array.isArray(data)? data : []).map(r=> ({...r, __verified: false, __suggestions: []}))
       setMembersCollections(enriched)
+      if(!enriched.length){
+        setStatus('No collection rows found')
+      }else{
+        setStatus('')
+      }
       if(enriched && enriched.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
         const keys = Object.keys(enriched[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
         if(!keys.includes('verified')) keys.push('verified')
         setMembersCollectionsFields(keys)
       }
-    }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]) }
+      return true
+    }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]); return false }
   }
 
   // Simple Levenshtein distance for fuzzy matching
