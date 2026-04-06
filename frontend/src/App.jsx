@@ -71,10 +71,20 @@ export default function App(){
 
   // ----- Shared data -----
   const [churches, setChurches] = useState([])
+  const [appName, setAppName] = useState('Church Offerings — Admin Console')  // Custom app name for the church
 
   useEffect(()=>{
     fetchChurches()
   }, [])
+
+  // Fetch app_name when user logs in and has a church assigned
+  useEffect(()=>{
+    if(user && currentUserChurchId){
+      fetchAppName()
+    }else if(!user){
+      setAppName('Church Offerings — Admin Console')
+    }
+  }, [user, currentUserChurchId])
 
   useEffect(()=>{
     if(token){ localStorage.setItem('token', token) }
@@ -93,6 +103,20 @@ export default function App(){
     try{ const res = await fetch('http://localhost:8000/churches'); const data = await res.json(); setChurches(data) }catch(e){}
   }
 
+  async function fetchAppName(){
+    try{
+      const churchId = currentUserChurchId || (user && user.church)
+      if(!churchId) return
+      const res = await fetch(`http://localhost:8000/churches/${churchId}/app_name`, { headers: authHeaders() })
+      const data = await res.json().catch(()=> ({}))
+      if(res.ok && data.app_name){
+        setAppName(data.app_name)
+      }
+    }catch(e){
+      // Silently fail; keep default app name
+    }
+  }
+
   // ----- Login / token management -----
   const [loginUser, setLoginUser] = useState('')
   const [loginPass, setLoginPass] = useState('')
@@ -108,6 +132,103 @@ export default function App(){
     }catch(e){ setStatus('Login failed: '+e.message) }
   }
   function logout(){ setToken(''); setUser(null); setStatus('Logged out'); }
+
+  // ----- Admin: Settings -----
+  const [editingAppName, setEditingAppName] = useState('')
+  const [showEditAppName, setShowEditAppName] = useState(false)
+  const [localCollectionCodes, setLocalCollectionCodes] = useState([])
+  const [newCodeColumn, setNewCodeColumn] = useState('')
+  const [newCodeLabel, setNewCodeLabel] = useState('')
+  const [editingCodeId, setEditingCodeId] = useState(null)
+  const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:''})
+
+  async function submitAppName(){
+    try{
+      if(!currentUserChurchId){ setStatus('Error: Unable to determine church'); return }
+      const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/app_name`, {
+        method: 'PUT',
+        headers: {...authHeaders(), 'Content-Type':'application/json'},
+        body: JSON.stringify({app_name: editingAppName})
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
+      setAppName(editingAppName)
+      setShowEditAppName(false)
+      setStatus('App name updated successfully')
+    }catch(e){ setStatus('Update app name failed: '+e.message) }
+  }
+
+  async function createLocalCode(){
+    try{
+      if(!currentUserChurchId){ setStatus('Error: Unable to determine church'); return }
+      if(!newCodeColumn.trim()){ setStatus('Error: Column name is required'); return }
+      if(!newCodeLabel.trim()){ setStatus('Error: Code label is required'); return }
+      const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes`, {
+        method: 'POST',
+        headers: {...authHeaders(), 'Content-Type':'application/json'},
+        body: JSON.stringify({column_name: newCodeColumn, code: newCodeLabel})
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
+      setNewCodeColumn('')
+      setNewCodeLabel('')
+      fetchLocalCodes()
+      setStatus('Code created successfully')
+    }catch(e){ setStatus('Create code failed: '+e.message) }
+  }
+
+  async function updateLocalCode(){
+    try{
+      if(!currentUserChurchId){ setStatus('Error: Unable to determine church'); return }
+      if(!editingCodeId){ setStatus('Error: No code selected'); return }
+      const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes/${editingCodeId}`, {
+        method: 'PUT',
+        headers: {...authHeaders(), 'Content-Type':'application/json'},
+        body: JSON.stringify({column_name: editCodeForm.column_name, code: editCodeForm.code})
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
+      setEditingCodeId(null)
+      setEditCodeForm({column_name:'', code:''})
+      fetchLocalCodes()
+      setStatus('Code updated successfully')
+    }catch(e){ setStatus('Update code failed: '+e.message) }
+  }
+
+  async function deleteLocalCode(codeId){
+    try{
+      if(!currentUserChurchId){ setStatus('Error: Unable to determine church'); return }
+      if(!window.confirm('Are you sure you want to delete this code?')) return
+      const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes/${codeId}`, {
+        method: 'DELETE',
+        headers: authHeaders()
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
+      fetchLocalCodes()
+      setStatus('Code deleted successfully')
+    }catch(e){ setStatus('Delete code failed: '+e.message) }
+  }
+
+  async function fetchLocalCodes(){
+    try{
+      if(!currentUserChurchId){ return }
+      // Filter codes where church == currentUserChurchId from the full collection_codes list
+      const res = await fetch('http://localhost:8000/collection_codes', { headers: authHeaders() })
+      const data = await res.json().catch(()=>[])
+      if(res.ok){
+        const localCodes = data.filter(c=>Number(c.church)===Number(currentUserChurchId))
+        setLocalCollectionCodes(localCodes)
+      }
+    }catch(e){ /* silently fail */ }
+  }
+
+  useEffect(()=>{
+    if(page==='settings' && currentUserChurchId){
+      setEditingAppName(appName)
+      fetchLocalCodes()
+    }
+  }, [page, currentUserChurchId])
 
   // ----- Admin: users -----
   const [usersList, setUsersList] = useState([])
@@ -587,7 +708,7 @@ export default function App(){
   return (
     <div style={{fontFamily:'Arial',padding:18}}>
       <header style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <h2>Church Offerings — Admin Console</h2>
+        <h2>{appName}</h2>
         <div>
           <div>
             <strong>{user.username}</strong> ({user.role})
@@ -616,6 +737,7 @@ export default function App(){
         <button onClick={()=>setPage('members_collections')}>Members Collections</button>
         <button onClick={()=>setPage('reports')}>Reports</button>
         {isAdmin() && <button onClick={()=>{ setPage('admin'); fetchUsers() }}>Admin</button>}
+        {isAdmin() && <button onClick={()=>setPage('settings')}>Settings</button>}
         <span style={{marginLeft:12,color:'#666'}}>{status}</span>
       </nav>
 
@@ -693,6 +815,74 @@ export default function App(){
                     <button onClick={()=>{ setResetUser(null); setResetPassword('') }}>Cancel</button>
                   </div>
                   <div style={{marginTop:6,fontSize:12,color:'#666'}}>{PASSWORD_HINT}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {page==='settings' && (
+          <div>
+            <h3>Settings</h3>
+            
+            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+              <h4>Application Name</h4>
+              {!showEditAppName ? (
+                <div>
+                  <p><strong>Current:</strong> {appName}</p>
+                  <button onClick={()=>{ setEditingAppName(appName); setShowEditAppName(true); }}>Edit</button>
+                </div>
+              ) : (
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <input type='text' value={editingAppName} onChange={e=>setEditingAppName(e.target.value)} placeholder='Application name' />
+                  <button onClick={submitAppName}>Save</button>
+                  <button onClick={()=>{ setShowEditAppName(false); setEditingAppName(''); }}>Cancel</button>
+                </div>
+              )}
+            </div>
+
+            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+              <h4>Local Collection Codes</h4>
+              <p style={{fontSize:12,color:'#666'}}>These codes apply only to your church. Global codes are shared across all churches.</p>
+              
+              <div style={{marginBottom:12}}>
+                <h5>Add New Code</h5>
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Column name (e.g., c21)' />
+                  <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Label (e.g., SPECIAL OFFERING)' />
+                  <button onClick={createLocalCode}>Create Code</button>
+                </div>
+              </div>
+
+              {localCollectionCodes.length > 0 && (
+                <div>
+                  <h5>Your Codes</h5>
+                  <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
+                    <thead><tr><th>Column</th><th>Label</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {localCollectionCodes.map(code=> (
+                        <tr key={code.id}>
+                          <td>{code.column_name}</td>
+                          <td>{code.code}</td>
+                          <td>
+                            {editingCodeId !== code.id ? (
+                              <>
+                                <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code}); }} style={{marginRight:8}}>Edit</button>
+                                <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>
+                              </>
+                            ) : (
+                              <>
+                                <input type='text' value={editCodeForm.column_name} onChange={e=>setEditCodeForm({...editCodeForm,column_name:e.target.value})} style={{marginRight:4}} />
+                                <input type='text' value={editCodeForm.code} onChange={e=>setEditCodeForm({...editCodeForm,code:e.target.value})} style={{marginRight:4}} />
+                                <button onClick={updateLocalCode} style={{marginRight:4}}>Save</button>
+                                <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:''}); }}>Cancel</button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
