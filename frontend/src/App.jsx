@@ -345,7 +345,7 @@ export default function App(){
   }, [page, currentUserChurchId])
 
   useEffect(()=>{
-    if(page==='collections' && currentUserChurchId && hasRoleRight('can_manage_collections', true)){
+    if(page==='collections' && currentUserChurchId && (hasRoleRight('can_manage_collections', true) || hasRoleRight('can_view_collection_codes', true))){
       fetchLocalCodes()
     }
   }, [page, currentUserChurchId, rolesCatalog, user])
@@ -977,7 +977,7 @@ export default function App(){
           <div style={{fontWeight:700,marginBottom:10}}>Menu</div>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {hasRoleRight('can_view_dashboard', true) && <button onClick={()=>setPage('dashboard')} style={{textAlign:'left',background:page==='dashboard' ? '#e8f0fe' : '#fff'}}>Dashboard</button>}
-            {hasRoleRight('can_manage_collections', true) && <button onClick={()=>setPage('collections')} style={{textAlign:'left',background:page==='collections' ? '#e8f0fe' : '#fff'}}>Collections</button>}
+            {(hasRoleRight('can_manage_collections', true) || hasRoleRight('can_view_collection_codes', true)) && <button onClick={()=>setPage('collections')} style={{textAlign:'left',background:page==='collections' ? '#e8f0fe' : '#fff'}}>Collections</button>}
             {hasRoleRight('can_manage_members', true) && <button onClick={()=>setPage('members')} style={{textAlign:'left',background:page==='members' ? '#e8f0fe' : '#fff'}}>Members</button>}
             {hasRoleRight('can_manage_members_collections', true) && <button onClick={()=>setPage('members_collections')} style={{textAlign:'left',background:page==='members_collections' ? '#e8f0fe' : '#fff'}}>Members Collections</button>}
             {hasRoleRight('can_view_reports', true) && <button onClick={()=>setPage('reports')} style={{textAlign:'left',background:page==='reports' ? '#e8f0fe' : '#fff'}}>Reports</button>}
@@ -1355,17 +1355,23 @@ export default function App(){
 
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
               <h4>Collection Codes</h4>
-              <p style={{fontSize:12,color:'#666'}}>View existing church collection codes, edit them, or add more for your church.</p>
+              <p style={{fontSize:12,color:'#666'}}>
+                {hasRoleRight('can_manage_collections', true) 
+                  ? 'View existing church collection codes, edit them, or add more for your church.' 
+                  : 'View existing church collection codes.'}
+              </p>
               {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,borderRadius:6}}>A church assignment is required to manage collection codes.</div>}
 
-              <div style={{marginBottom:12}}>
-                <h5>Add New Code</h5>
-                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                  <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Collection name' disabled={!currentUserChurchId} />
-                  <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Code' disabled={!currentUserChurchId} />
-                  <button onClick={createLocalCode} disabled={!currentUserChurchId}>Add Code</button>
+              {hasRoleRight('can_manage_collections', true) && (
+                <div style={{marginBottom:12}}>
+                  <h5>Add New Code</h5>
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Collection name' disabled={!currentUserChurchId} />
+                    <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Code' disabled={!currentUserChurchId} />
+                    <button onClick={createLocalCode} disabled={!currentUserChurchId}>Add Code</button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <h5>Existing Codes</h5>
@@ -1373,27 +1379,29 @@ export default function App(){
                   <div style={{color:'#666'}}>No collection codes found for this church.</div>
                 ) : (
                   <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
-                    <thead><tr><th>Collection Name</th><th>Code</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Collection Name</th><th>Code</th>{hasRoleRight('can_manage_collections', true) && <th>Actions</th>}</tr></thead>
                     <tbody>
                       {localCollectionCodes.map(code=> (
                         <tr key={code.id}>
                           <td>{code.column_name}</td>
                           <td>{code.code}</td>
-                          <td>
-                            {editingCodeId !== code.id ? (
-                              <>
-                                <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code}); }} style={{marginRight:8}}>Edit</button>
-                                <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>
-                              </>
-                            ) : (
-                              <>
-                                <input type='text' value={editCodeForm.column_name} onChange={e=>setEditCodeForm({...editCodeForm,column_name:e.target.value})} style={{marginRight:4}} />
-                                <input type='text' value={editCodeForm.code} onChange={e=>setEditCodeForm({...editCodeForm,code:e.target.value})} style={{marginRight:4}} />
-                                <button onClick={updateLocalCode} style={{marginRight:4}}>Save</button>
-                                <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:''}); }}>Cancel</button>
-                              </>
-                            )}
-                          </td>
+                          {hasRoleRight('can_manage_collections', true) && (
+                            <td>
+                              {editingCodeId !== code.id ? (
+                                <>
+                                  <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code}); }} style={{marginRight:8}}>Edit</button>
+                                  <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>
+                                </>
+                              ) : (
+                                <>
+                                  <input type='text' value={editCodeForm.column_name} onChange={e=>setEditCodeForm({...editCodeForm,column_name:e.target.value})} style={{marginRight:4}} />
+                                  <input type='text' value={editCodeForm.code} onChange={e=>setEditCodeForm({...editCodeForm,code:e.target.value})} style={{marginRight:4}} />
+                                  <button onClick={updateLocalCode} style={{marginRight:4}}>Save</button>
+                                  <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:''}); }}>Cancel</button>
+                                </>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>

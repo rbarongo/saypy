@@ -467,6 +467,7 @@ role_policies = Table(
     Column('can_view_reports', Integer, nullable=False, server_default='0'),
     Column('can_manage_settings', Integer, nullable=False, server_default='0'),
     Column('can_manage_roles', Integer, nullable=False, server_default='0'),
+    Column('can_view_collection_codes', Integer, nullable=False, server_default='0'),
     Column('system_protected', Integer, nullable=False, server_default='0'),
 )
 
@@ -781,6 +782,7 @@ def seed_role_policies():
                 'can_view_reports': 1,
                 'can_manage_settings': 1,
                 'can_manage_roles': 1,
+                'can_view_collection_codes': 1,
                 'system_protected': 1,
             },
             {
@@ -794,6 +796,7 @@ def seed_role_policies():
                 'can_view_reports': 1,
                 'can_manage_settings': 1,
                 'can_manage_roles': 0,
+                'can_view_collection_codes': 1,
                 'system_protected': 1,
             },
             {
@@ -807,6 +810,7 @@ def seed_role_policies():
                 'can_view_reports': 1,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
+                'can_view_collection_codes': 1,
                 'system_protected': 1,
             },
             {
@@ -820,6 +824,7 @@ def seed_role_policies():
                 'can_view_reports': 1,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
+                'can_view_collection_codes': 1,
                 'system_protected': 1,
             },
             {
@@ -833,6 +838,7 @@ def seed_role_policies():
                 'can_view_reports': 0,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
+                'can_view_collection_codes': 1,
                 'system_protected': 1,
             },
             {
@@ -846,6 +852,7 @@ def seed_role_policies():
                 'can_view_reports': 1,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
+                'can_view_collection_codes': 1,
                 'system_protected': 1,
             },
         ]
@@ -869,7 +876,7 @@ def list_role_policies() -> List[dict]:
                 SELECT id, role, display_name,
                        can_view_dashboard, can_manage_users, can_manage_members,
                        can_manage_collections, can_manage_members_collections, can_view_reports,
-                       can_manage_settings, can_manage_roles, system_protected
+                       can_manage_settings, can_manage_roles, can_view_collection_codes, system_protected
                 FROM role_policies
                 ORDER BY role
             '''))
@@ -886,7 +893,8 @@ def list_role_policies() -> List[dict]:
                     'can_view_reports': bool(r[8]),
                     'can_manage_settings': bool(r[9]),
                     'can_manage_roles': bool(r[10]),
-                    'system_protected': bool(r[11]),
+                    'can_view_collection_codes': bool(r[11]),
+                    'system_protected': bool(r[12]),
                 })
         except Exception:
             pass
@@ -1036,6 +1044,7 @@ def ensure_role_policies_schema():
     existing = {c['name'] for c in inspector.get_columns('role_policies')}
     expected = {
         'can_manage_members_collections': 'INTEGER',
+        'can_view_collection_codes': 'INTEGER',
     }
     added_cols = []
     for col, typ in expected.items():
@@ -1057,6 +1066,18 @@ def ensure_role_policies_schema():
             conn.execute(text('''
                 UPDATE role_policies
                 SET can_manage_members_collections = 1
+                WHERE LOWER(role) IN ('system_admin', 'admin', 'treasurer', 'data_steward', 'uploader', 'viewer')
+            '''))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+    
+    if 'can_view_collection_codes' in added_cols:
+        with engine.connect() as conn:
+            conn.execute(text('''
+                UPDATE role_policies
+                SET can_view_collection_codes = 1
                 WHERE LOWER(role) IN ('system_admin', 'admin', 'treasurer', 'data_steward', 'uploader', 'viewer')
             '''))
             try:

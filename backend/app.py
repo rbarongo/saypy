@@ -122,6 +122,7 @@ def _role_has_right(role: Optional[str], right_flag: str) -> bool:
         'can_manage_members': {ROLE_ADMIN, ROLE_DATA_STEWARD},
         'can_manage_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER},
         'can_manage_members_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER},
+        'can_view_collection_codes': {ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER, ROLE_VIEWER},
     }
     try:
         for rp in list_role_policies():
