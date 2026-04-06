@@ -173,6 +173,7 @@ export default function App(){
     can_manage_members: false,
     can_manage_collections: false,
     can_manage_members_collections: false,
+    can_view_collection_codes: false,
     can_view_reports: false,
     can_manage_settings: false,
     can_manage_roles: false,
@@ -256,11 +257,11 @@ export default function App(){
   async function fetchLocalCodes(){
     try{
       if(!currentUserChurchId){ return }
-      // Filter codes where church == currentUserChurchId from the full collection_codes list
+      // Show church-specific codes plus global shared codes.
       const res = await fetch('http://localhost:8000/collection_codes', { headers: authHeaders() })
       const data = await res.json().catch(()=>[])
       if(res.ok){
-        const localCodes = data.filter(c=>Number(c.church)===Number(currentUserChurchId))
+        const localCodes = data.filter(c=> c.church == null || Number(c.church)===Number(currentUserChurchId))
         setLocalCollectionCodes(localCodes)
       }
     }catch(e){ /* silently fail */ }
@@ -290,6 +291,7 @@ export default function App(){
         can_manage_members: false,
         can_manage_collections: false,
         can_manage_members_collections: false,
+        can_view_collection_codes: false,
         can_view_reports: false,
         can_manage_settings: false,
         can_manage_roles: false,
@@ -1185,6 +1187,7 @@ export default function App(){
                       <label><input type='checkbox' checked={!!newRole.can_manage_members} onChange={e=>setNewRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> Members</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_collections} onChange={e=>setNewRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> Collections</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_members_collections} onChange={e=>setNewRole(prev=>({...prev, can_manage_members_collections:e.target.checked}))} /> Members Collections</label>
+                      <label><input type='checkbox' checked={!!newRole.can_view_collection_codes} onChange={e=>setNewRole(prev=>({...prev, can_view_collection_codes:e.target.checked}))} /> View Collection Codes</label>
                       <label><input type='checkbox' checked={!!newRole.can_view_reports} onChange={e=>setNewRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> Reports</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_settings} onChange={e=>setNewRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> Settings</label>
                       <button onClick={createRolePolicy}>Add Role</button>
@@ -1202,6 +1205,7 @@ export default function App(){
                           <th>Members</th>
                           <th>Collections</th>
                           <th>Members Collections</th>
+                          <th>View Collection Codes</th>
                           <th>Reports</th>
                           <th>Settings</th>
                           <th>Manage Roles</th>
@@ -1218,6 +1222,7 @@ export default function App(){
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_members} onChange={e=>setEditingRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> : (r.can_manage_members ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_collections} onChange={e=>setEditingRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> : (r.can_manage_collections ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_members_collections} onChange={e=>setEditingRole(prev=>({...prev, can_manage_members_collections:e.target.checked}))} /> : (r.can_manage_members_collections ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_view_collection_codes} onChange={e=>setEditingRole(prev=>({...prev, can_view_collection_codes:e.target.checked}))} /> : (r.can_view_collection_codes ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_view_reports} onChange={e=>setEditingRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> : (r.can_view_reports ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_settings} onChange={e=>setEditingRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> : (r.can_manage_settings ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_roles} onChange={e=>setEditingRole(prev=>({...prev, can_manage_roles:e.target.checked}))} /> : (r.can_manage_roles ? 'Yes':'No')}</td>

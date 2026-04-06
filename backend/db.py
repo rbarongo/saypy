@@ -930,6 +930,7 @@ def upsert_role_policy(role_name: str, display_name: Optional[str], rights: dict
         'can_manage_members': 1 if rights.get('can_manage_members') else 0,
         'can_manage_collections': 1 if rights.get('can_manage_collections') else 0,
         'can_manage_members_collections': 1 if rights.get('can_manage_members_collections') else 0,
+        'can_view_collection_codes': 1 if rights.get('can_view_collection_codes') else 0,
         'can_view_reports': 1 if rights.get('can_view_reports') else 0,
         'can_manage_settings': 1 if rights.get('can_manage_settings') else 0,
         'can_manage_roles': 1 if rights.get('can_manage_roles') else 0,
@@ -945,6 +946,7 @@ def upsert_role_policy(role_name: str, display_name: Optional[str], rights: dict
                     can_manage_members=:can_manage_members,
                     can_manage_collections=:can_manage_collections,
                     can_manage_members_collections=:can_manage_members_collections,
+                    can_view_collection_codes=:can_view_collection_codes,
                     can_view_reports=:can_view_reports,
                     can_manage_settings=:can_manage_settings,
                     can_manage_roles=:can_manage_roles

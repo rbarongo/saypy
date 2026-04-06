@@ -657,17 +657,17 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
 def list_collection_codes(current_user: dict = Depends(get_current_user)):
     """List collection codes scoped by church.
 
-    - System admin: sees all church-scoped codes.
-    - Non-system users: see only their church codes.
+    - System admin: sees all codes.
+    - Non-system users: see their church codes plus global codes.
     """
     try:
         church_id = current_user.get('church')
         role = str(current_user.get('role') or '').lower()
         params = {}
         if role == ROLE_SYSTEM_ADMIN:
-            query = 'SELECT * FROM collection_codes WHERE church IS NOT NULL ORDER BY church, id'
+            query = 'SELECT * FROM collection_codes ORDER BY CASE WHEN church IS NULL THEN 0 ELSE 1 END, church, id'
         else:
-            query = 'SELECT * FROM collection_codes WHERE church = :church_id ORDER BY id'
+            query = 'SELECT * FROM collection_codes WHERE church = :church_id OR church IS NULL ORDER BY CASE WHEN church IS NULL THEN 0 ELSE 1 END, id'
             params['church_id'] = church_id
         
         with engine.connect() as conn:
@@ -926,6 +926,7 @@ class RolePolicyIn(BaseModel):
     can_manage_members: bool = False
     can_manage_collections: bool = False
     can_manage_members_collections: bool = False
+    can_view_collection_codes: bool = False
     can_view_reports: bool = False
     can_manage_settings: bool = False
     can_manage_roles: bool = False
@@ -959,6 +960,7 @@ def create_role(payload: RolePolicyIn, current_user: dict = Depends(get_current_
             'can_manage_members': payload.can_manage_members,
             'can_manage_collections': payload.can_manage_collections,
             'can_manage_members_collections': payload.can_manage_members_collections,
+            'can_view_collection_codes': payload.can_view_collection_codes,
             'can_view_reports': payload.can_view_reports,
             'can_manage_settings': payload.can_manage_settings,
             'can_manage_roles': payload.can_manage_roles,
@@ -988,6 +990,7 @@ def update_role(role_name: str, payload: RolePolicyIn, current_user: dict = Depe
             'can_manage_members': payload.can_manage_members,
             'can_manage_collections': payload.can_manage_collections,
             'can_manage_members_collections': payload.can_manage_members_collections,
+            'can_view_collection_codes': payload.can_view_collection_codes,
             'can_view_reports': payload.can_view_reports,
             'can_manage_settings': payload.can_manage_settings,
             'can_manage_roles': payload.can_manage_roles,
