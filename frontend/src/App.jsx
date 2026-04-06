@@ -172,6 +172,7 @@ export default function App(){
     can_manage_users: false,
     can_manage_members: false,
     can_manage_collections: false,
+    can_manage_members_collections: false,
     can_view_reports: false,
     can_manage_settings: false,
     can_manage_roles: false,
@@ -288,6 +289,7 @@ export default function App(){
         can_manage_users: false,
         can_manage_members: false,
         can_manage_collections: false,
+        can_manage_members_collections: false,
         can_view_reports: false,
         can_manage_settings: false,
         can_manage_roles: false,
@@ -944,7 +946,7 @@ export default function App(){
             {hasRoleRight('can_view_dashboard', true) && <button onClick={()=>setPage('dashboard')} style={{textAlign:'left',background:page==='dashboard' ? '#e8f0fe' : '#fff'}}>Dashboard</button>}
             {hasRoleRight('can_manage_collections', true) && <button onClick={()=>setPage('collections')} style={{textAlign:'left',background:page==='collections' ? '#e8f0fe' : '#fff'}}>Collections</button>}
             {hasRoleRight('can_manage_members', true) && <button onClick={()=>setPage('members')} style={{textAlign:'left',background:page==='members' ? '#e8f0fe' : '#fff'}}>Members</button>}
-            {hasRoleRight('can_manage_collections', true) && <button onClick={()=>setPage('members_collections')} style={{textAlign:'left',background:page==='members_collections' ? '#e8f0fe' : '#fff'}}>Members Collections</button>}
+            {hasRoleRight('can_manage_members_collections', true) && <button onClick={()=>setPage('members_collections')} style={{textAlign:'left',background:page==='members_collections' ? '#e8f0fe' : '#fff'}}>Members Collections</button>}
             {hasRoleRight('can_view_reports', true) && <button onClick={()=>setPage('reports')} style={{textAlign:'left',background:page==='reports' ? '#e8f0fe' : '#fff'}}>Reports</button>}
             {hasRoleRight('can_manage_users', isAdmin()) && <button onClick={()=>{ setPage('admin'); fetchUsers() }} style={{textAlign:'left',background:page==='admin' ? '#e8f0fe' : '#fff'}}>Admin</button>}
             {hasRoleRight('can_manage_settings', isAdmin()) && <button onClick={()=>setPage('settings')} style={{textAlign:'left',background:page==='settings' ? '#e8f0fe' : '#fff'}}>Settings</button>}
@@ -1149,6 +1151,7 @@ export default function App(){
                       <label><input type='checkbox' checked={!!newRole.can_manage_users} onChange={e=>setNewRole(prev=>({...prev, can_manage_users:e.target.checked}))} /> Users</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_members} onChange={e=>setNewRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> Members</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_collections} onChange={e=>setNewRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> Collections</label>
+                      <label><input type='checkbox' checked={!!newRole.can_manage_members_collections} onChange={e=>setNewRole(prev=>({...prev, can_manage_members_collections:e.target.checked}))} /> Members Collections</label>
                       <label><input type='checkbox' checked={!!newRole.can_view_reports} onChange={e=>setNewRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> Reports</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_settings} onChange={e=>setNewRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> Settings</label>
                       <button onClick={createRolePolicy}>Add Role</button>
@@ -1165,6 +1168,7 @@ export default function App(){
                           <th>Users</th>
                           <th>Members</th>
                           <th>Collections</th>
+                          <th>Members Collections</th>
                           <th>Reports</th>
                           <th>Settings</th>
                           <th>Manage Roles</th>
@@ -1180,6 +1184,7 @@ export default function App(){
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_users} onChange={e=>setEditingRole(prev=>({...prev, can_manage_users:e.target.checked}))} /> : (r.can_manage_users ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_members} onChange={e=>setEditingRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> : (r.can_manage_members ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_collections} onChange={e=>setEditingRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> : (r.can_manage_collections ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_members_collections} onChange={e=>setEditingRole(prev=>({...prev, can_manage_members_collections:e.target.checked}))} /> : (r.can_manage_members_collections ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_view_reports} onChange={e=>setEditingRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> : (r.can_view_reports ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_settings} onChange={e=>setEditingRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> : (r.can_manage_settings ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_roles} onChange={e=>setEditingRole(prev=>({...prev, can_manage_roles:e.target.checked}))} /> : (r.can_manage_roles ? 'Yes':'No')}</td>

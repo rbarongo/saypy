@@ -112,6 +112,33 @@ def _require_auth_roles(auth: dict, allowed_roles: set, context: str = 'this ope
     raise HTTPException(status_code=403, detail=f'Not authorized for {context}')
 
 
+def _role_has_right(role: Optional[str], right_flag: str) -> bool:
+    r = str(role or '').strip().lower()
+    if r == ROLE_SYSTEM_ADMIN:
+        return True
+    # Backward-compatible fallback if policies are unavailable.
+    fallback = {
+        'can_manage_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER},
+        'can_manage_members_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER},
+    }
+    try:
+        for rp in list_role_policies():
+            if str(rp.get('role') or '').strip().lower() == r:
+                if right_flag in rp:
+                    return bool(rp.get(right_flag))
+                break
+    except Exception:
+        pass
+    return r in fallback.get(right_flag, set())
+
+
+def _require_auth_right(auth: dict, right_flag: str, context: str = 'this operation'):
+    role = _auth_role(auth)
+    if _role_has_right(role, right_flag):
+        return
+    raise HTTPException(status_code=403, detail=f'Not authorized for {context}')
+
+
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing or invalid authorization token")
@@ -300,7 +327,7 @@ def _guess_s1_column(df):
 
 @app.post('/upload')
 async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api_key_or_user), request: Request = None):
-    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection upload')
+    _require_auth_right(auth, 'can_manage_collections', context='collection upload')
     df = _read_upload_file(batch)
     if df is None:
         raise HTTPException(status_code=400, detail="No data parsed from file")
@@ -351,7 +378,7 @@ async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api
 @app.post('/upload/headers')
 async def upload_headers(batch: UploadFile = File(...), auth: dict = Depends(require_api_key_or_user), request: Request = None):
     """Receive an uploaded Excel/CSV and return headers and first 5 rows for preview without inserting."""
-    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection upload preview')
+    _require_auth_right(auth, 'can_manage_collections', context='collection upload preview')
     df = _read_upload_file(batch)
     if df is None:
         raise HTTPException(status_code=400, detail="No data parsed from file")
@@ -489,7 +516,7 @@ def create_members_collection(payload: MemberCollectionIn, auth: dict = Depends(
 def update_members_collection(row_id: int, payload: dict, auth: dict = Depends(require_api_key_or_user)):
     """Update a members_collection row by id. Accepts any subset of columns present in the table."""
     try:
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection update')
+        _require_auth_right(auth, 'can_manage_members_collections', context='collection update')
         # limit updates to known columns to avoid SQL injection
         cols = get_target_columns('members_collection')
         if not cols:
@@ -537,7 +564,7 @@ def update_members_collection(row_id: int, payload: dict, auth: dict = Depends(r
 @app.post('/members_collections/bulk')
 def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(require_api_key_or_user), request: Request = None):
     """Accept a list of dicts and insert into `members_collection` in bulk."""
-    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='bulk collection insert')
+    _require_auth_right(auth, 'can_manage_collections', context='bulk collection insert')
     received_count = len(rows) if rows is not None else 0
     if not rows:
         raise HTTPException(status_code=400, detail={"message": "No rows provided", "received": received_count})
@@ -724,7 +751,7 @@ class MembersCollectionRow(BaseModel):
 @app.post('/members_collections/validate')
 def validate_members_collections(rows: List[dict], auth: dict = Depends(require_api_key_or_user), request: Request = None):
     """Validate rows and return per-row validation errors (if any)."""
-    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection validation')
+    _require_auth_right(auth, 'can_manage_collections', context='collection validation')
     errors = []
     pre_rows = []
     # If API key present, use uploader to default church/source
@@ -870,6 +897,7 @@ class RolePolicyIn(BaseModel):
     can_manage_users: bool = False
     can_manage_members: bool = False
     can_manage_collections: bool = False
+    can_manage_members_collections: bool = False
     can_view_reports: bool = False
     can_manage_settings: bool = False
     can_manage_roles: bool = False
@@ -903,6 +931,7 @@ def create_role(payload: RolePolicyIn, current_user: dict = Depends(get_current_
             'can_manage_users': payload.can_manage_users,
             'can_manage_members': payload.can_manage_members,
             'can_manage_collections': payload.can_manage_collections,
+            'can_manage_members_collections': payload.can_manage_members_collections,
             'can_view_reports': payload.can_view_reports,
             'can_manage_settings': payload.can_manage_settings,
             'can_manage_roles': payload.can_manage_roles,
@@ -931,6 +960,7 @@ def update_role(role_name: str, payload: RolePolicyIn, current_user: dict = Depe
             'can_manage_users': payload.can_manage_users,
             'can_manage_members': payload.can_manage_members,
             'can_manage_collections': payload.can_manage_collections,
+            'can_manage_members_collections': payload.can_manage_members_collections,
             'can_view_reports': payload.can_view_reports,
             'can_manage_settings': payload.can_manage_settings,
             'can_manage_roles': payload.can_manage_roles,
@@ -1413,7 +1443,7 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
 def report_members_collections(start_date: Optional[str] = None, end_date: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     """Return members_collection rows, optionally filtered by s2 (date) range. Dates in ISO format."""
     try:
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER}, context='reports access')
+        _require_auth_right(auth, 'can_manage_members_collections', context='members collections access')
         # Read full table into pandas then filter by s2 in Python to avoid SQL param dialect issues
         df = pd.read_sql_table('members_collection', con=engine)
         actor_church = _auth_context_church(auth)
