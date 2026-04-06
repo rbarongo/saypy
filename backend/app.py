@@ -814,7 +814,7 @@ class ChurchCreateIn(BaseModel):
 @app.post('/collection_codes')
 def create_collection_code(payload: CollectionCodeIn, auth: dict = Depends(require_api_key_or_user)):
     try:
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}, context='collection code creation')
+        _require_auth_right(auth, 'can_manage_collections', context='collection code creation')
         with engine.connect() as conn:
             actor_church = _auth_context_church(auth)
             if actor_church is None:
@@ -1301,14 +1301,12 @@ def update_church_app_name(church_id: int, payload: AppNameIn, current_user: dic
 
 @app.post('/churches/{church_id}/collection_codes')
 def create_church_collection_code(church_id: int, payload: CollectionCodeIn, current_user: dict = Depends(get_current_user)):
-    """Create a church-specific collection code (admin only)."""
+    """Create a church-specific collection code for users with collection rights."""
     try:
-        # Check if user is admin for this church
         user_church = current_user.get('church')
-        user_role = current_user.get('role')
-        if user_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
-            raise HTTPException(status_code=403, detail='Only admins can create collection codes')
-        if user_role == ROLE_ADMIN and user_church != church_id:
+        if not _role_has_right(current_user.get('role'), 'can_manage_collections'):
+            raise HTTPException(status_code=403, detail='Not authorized for collection code creation')
+        if not _is_system_admin_user(current_user) and user_church != church_id:
             raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
         
         with engine.connect() as conn:
@@ -1327,14 +1325,12 @@ def create_church_collection_code(church_id: int, payload: CollectionCodeIn, cur
 
 @app.put('/churches/{church_id}/collection_codes/{code_id}')
 def update_church_collection_code(church_id: int, code_id: int, payload: CollectionCodeIn, current_user: dict = Depends(get_current_user)):
-    """Update a church-specific collection code (admin only)."""
+    """Update a church-specific collection code for users with collection rights."""
     try:
-        # Check if user is admin for this church
         user_church = current_user.get('church')
-        user_role = current_user.get('role')
-        if user_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
-            raise HTTPException(status_code=403, detail='Only admins can update collection codes')
-        if user_role == ROLE_ADMIN and user_church != church_id:
+        if not _role_has_right(current_user.get('role'), 'can_manage_collections'):
+            raise HTTPException(status_code=403, detail='Not authorized for collection code update')
+        if not _is_system_admin_user(current_user) and user_church != church_id:
             raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
         
         # Verify code belongs to this church
@@ -1359,14 +1355,12 @@ def update_church_collection_code(church_id: int, code_id: int, payload: Collect
 
 @app.delete('/churches/{church_id}/collection_codes/{code_id}')
 def delete_church_collection_code(church_id: int, code_id: int, current_user: dict = Depends(get_current_user)):
-    """Delete a church-specific collection code (admin only)."""
+    """Delete a church-specific collection code for users with collection rights."""
     try:
-        # Check if user is admin for this church
         user_church = current_user.get('church')
-        user_role = current_user.get('role')
-        if user_role not in {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}:
-            raise HTTPException(status_code=403, detail='Only admins can delete collection codes')
-        if user_role == ROLE_ADMIN and user_church != church_id:
+        if not _role_has_right(current_user.get('role'), 'can_manage_collections'):
+            raise HTTPException(status_code=403, detail='Not authorized for collection code deletion')
+        if not _is_system_admin_user(current_user) and user_church != church_id:
             raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
         
         # Verify code belongs to this church
@@ -1390,9 +1384,16 @@ def delete_church_collection_code(church_id: int, code_id: int, current_user: di
 
 
 @app.put('/collection_codes/{code_id}')
-def update_collection_code(code_id: int, payload: CollectionCodeIn):
+def update_collection_code(code_id: int, payload: CollectionCodeIn, auth: dict = Depends(require_api_key_or_user)):
     try:
+        _require_auth_right(auth, 'can_manage_collections', context='collection code update')
+        actor_church = _auth_context_church(auth)
         with engine.connect() as conn:
+            if actor_church is not None:
+                row = conn.execute(text('SELECT church FROM collection_codes WHERE id=:id'), {'id': code_id}).fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail='Code not found')
+                _enforce_church_scope(row[0], actor_church, context='this collection code')
             conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c, custom_collection_name=:ccn WHERE id=:id"), {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "id": code_id})
             try:
                 conn.commit()
