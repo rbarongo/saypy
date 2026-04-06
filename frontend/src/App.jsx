@@ -239,6 +239,9 @@ export default function App(){
 
   // ----- Admin: users -----
   const [usersList, setUsersList] = useState([])
+  const [usersMaxRows, setUsersMaxRows] = useState(30)
+  const [usersSearchField, setUsersSearchField] = useState('all')
+  const [usersSearchText, setUsersSearchText] = useState('')
   const [editingUser, setEditingUser] = useState(null)
   const [userEditForm, setUserEditForm] = useState({ username:'', first_name:'', middle_name:'', last_name:'', email:'', phone:'', role:'uploader', church:'' })
   const [resetUser, setResetUser] = useState(null)
@@ -397,6 +400,9 @@ export default function App(){
 
   // ----- Members (list + update) -----
   const [members, setMembers] = useState([])
+  const [membersMaxRows, setMembersMaxRows] = useState(30)
+  const [membersSearchField, setMembersSearchField] = useState('all')
+  const [membersSearchText, setMembersSearchText] = useState('')
   const [membersQ, setMembersQ] = useState('')
   async function fetchMembers(q=''){
     try{
@@ -431,13 +437,14 @@ export default function App(){
   const [membersCollectionsFields, setMembersCollectionsFields] = useState([])
   const [showCollectionsInReports, setShowCollectionsInReports] = useState(false)
   const [mcFilterText, setMcFilterText] = useState('')
+  const [mcSearchField, setMcSearchField] = useState('all')
   const [mcFilterCode, setMcFilterCode] = useState('')
   const [mcFrom, setMcFrom] = useState('')
   const [mcTo, setMcTo] = useState('')
   const [mcSortKey, setMcSortKey] = useState('id')
   const [mcSortDir, setMcSortDir] = useState('desc')
   const [mcPage, setMcPage] = useState(1)
-  const [mcPageSize, setMcPageSize] = useState(50)
+  const [mcPageSize, setMcPageSize] = useState(30)
   const [editingCollection, setEditingCollection] = useState(null)
 
   // Load members when navigating to Members page
@@ -662,6 +669,8 @@ export default function App(){
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
   const [aggRows, setAggRows] = useState([])
+  const [reportMaxRows, setReportMaxRows] = useState(30)
+  const [reportCollectionsMaxRows, setReportCollectionsMaxRows] = useState(30)
   const [dashboardStats, setDashboardStats] = useState({ members: null, users: null, loading: false })
 
   async function fetchDashboardStats(){
@@ -725,6 +734,43 @@ export default function App(){
   }
   function isUploader(){ return user && user.role === 'uploader' }
 
+  function formatNumber(value){
+    if(value === null || value === undefined || Number.isNaN(Number(value))) return '-'
+    return new Intl.NumberFormat().format(Number(value))
+  }
+
+  const filteredUsers = (usersList || []).filter((u)=>{
+    const q = String(usersSearchText || '').trim().toLowerCase()
+    if(!q) return true
+    const fullName = [u?.first_name, u?.middle_name, u?.last_name].filter(Boolean).join(' ')
+    const churchName = (churches||[]).find(c=> Number(c.id)===Number(u?.church))?.name || u?.church || ''
+    const bag = {
+      username: u?.username || '',
+      name: fullName,
+      email: u?.email || '',
+      phone: u?.phone || '',
+      role: roleLabel(u?.role || ''),
+      church: String(churchName || ''),
+      all: [u?.id, u?.username, fullName, u?.email, u?.phone, roleLabel(u?.role || ''), churchName].join(' '),
+    }
+    return String(bag[usersSearchField] ?? bag.all).toLowerCase().includes(q)
+  })
+
+  const filteredMembers = (members || []).filter((m)=>{
+    const q = String(membersSearchText || '').trim().toLowerCase()
+    if(!q) return true
+    const churchName = (churches||[]).find(c=> Number(c.id)===Number(m?.church))?.name || m?.church || ''
+    const bag = {
+      name: m?.MEMBER_NAME || '',
+      member_id: m?.MEMBER_ID ?? '',
+      phone: m?.PHONE || '',
+      church: String(churchName || ''),
+      sno: m?.sno ?? '',
+      all: [m?.sno, m?.MEMBER_NAME, m?.MEMBER_ID, m?.PHONE, churchName].join(' '),
+    }
+    return String(bag[membersSearchField] ?? bag.all).toLowerCase().includes(q)
+  })
+
   // If not authenticated, show a focused login screen (no menu)
   if(!user){
     return (
@@ -786,13 +832,13 @@ export default function App(){
           <div>
             <h3>Dashboard</h3>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',gap:12}}>
-              <div style={{border:'1px solid #ddd',borderRadius:10,padding:16,background:'#fafafa'}}>
-                <div style={{fontSize:12,color:'#666'}}>Total Members</div>
-                <div style={{fontSize:28,fontWeight:700,marginTop:6}}>{dashboardStats.loading ? '...' : (dashboardStats.members ?? '-')}</div>
+              <div style={{border:'1px solid #d6e4ff',borderRadius:12,padding:18,background:'#f8fbff',boxShadow:'0 1px 3px rgba(14,30,64,0.08)'}}>
+                <div style={{fontSize:12,color:'#48608a',fontWeight:600,letterSpacing:'0.04em'}}>TOTAL MEMBERS</div>
+                <div style={{fontSize:42,fontWeight:800,lineHeight:1.1,marginTop:8,color:'#0f2d5c'}}>{dashboardStats.loading ? '...' : formatNumber(dashboardStats.members)}</div>
               </div>
-              <div style={{border:'1px solid #ddd',borderRadius:10,padding:16,background:'#fafafa'}}>
-                <div style={{fontSize:12,color:'#666'}}>Total Users</div>
-                <div style={{fontSize:28,fontWeight:700,marginTop:6}}>{dashboardStats.loading ? '...' : (dashboardStats.users ?? '-')}</div>
+              <div style={{border:'1px solid #d6e4ff',borderRadius:12,padding:18,background:'#f8fbff',boxShadow:'0 1px 3px rgba(14,30,64,0.08)'}}>
+                <div style={{fontSize:12,color:'#48608a',fontWeight:600,letterSpacing:'0.04em'}}>TOTAL USERS</div>
+                <div style={{fontSize:42,fontWeight:800,lineHeight:1.1,marginTop:8,color:'#0f2d5c'}}>{dashboardStats.loading ? '...' : formatNumber(dashboardStats.users)}</div>
               </div>
             </div>
           </div>
@@ -809,10 +855,28 @@ export default function App(){
             </div>
             <div style={{marginTop:12}}>
               <h4>Users</h4>
+              <div style={{marginBottom:8,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <label>Search</label>
+                <select value={usersSearchField} onChange={e=>setUsersSearchField(e.target.value)}>
+                  <option value='all'>All fields</option>
+                  <option value='username'>Username</option>
+                  <option value='name'>Name</option>
+                  <option value='email'>Email</option>
+                  <option value='phone'>Phone</option>
+                  <option value='role'>Role</option>
+                  <option value='church'>Church</option>
+                </select>
+                <input placeholder='Search users...' value={usersSearchText} onChange={e=>setUsersSearchText(e.target.value)} />
+                <label>Max rows</label>
+                <select value={usersMaxRows} onChange={e=>setUsersMaxRows(Number(e.target.value))}>
+                  {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
+                </select>
+                <span style={{color:'#666'}}>Showing {Math.min(filteredUsers.length, usersMaxRows)} of {filteredUsers.length}</span>
+              </div>
               <table border={1} cellPadding={6} style={{borderCollapse:'collapse'}}>
                 <thead><tr><th>ID</th><th>Username</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Church</th><th>Actions</th></tr></thead>
                 <tbody>
-                  {usersList.map(u=> {
+                  {filteredUsers.slice(0, usersMaxRows).map(u=> {
                     const chName = (churches||[]).find(c=> Number(c.id)===Number(u.church))?.name || u.church
                     const fullName = [u.first_name, u.middle_name, u.last_name].filter(Boolean).join(' ')
                     return (
@@ -948,11 +1012,26 @@ export default function App(){
         {page==='members' && (
           <div>
             <h3>Members</h3>
-            <div style={{marginBottom:8}}>
+            <div style={{marginBottom:8,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
               <input placeholder='Search members' value={membersQ} onChange={e=>setMembersQ(e.target.value)} />
               <button onClick={()=>fetchMembers(membersQ)}>Search</button>
+              <label style={{marginLeft:12}}>Filter</label>
+              <select value={membersSearchField} onChange={e=>setMembersSearchField(e.target.value)}>
+                <option value='all'>All fields</option>
+                <option value='name'>Name</option>
+                <option value='member_id'>Member ID</option>
+                <option value='phone'>Phone</option>
+                <option value='church'>Church</option>
+                <option value='sno'>SNO</option>
+              </select>
+              <input placeholder='Filter loaded members...' value={membersSearchText} onChange={e=>setMembersSearchText(e.target.value)} />
               <button style={{marginLeft:8}} onClick={()=>{ setEditingMember(null); setMemberForm({}); setShowMemberForm(true); }}>New Member</button>
               <label style={{marginLeft:12}}><input type='checkbox' checked={showAllMemberCols} onChange={e=>setShowAllMemberCols(e.target.checked)} /> Show all columns</label>
+              <label style={{marginLeft:12}}>Max rows</label>
+              <select value={membersMaxRows} onChange={e=>setMembersMaxRows(Number(e.target.value))}>
+                {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
+              </select>
+              <span style={{color:'#666'}}>Showing {Math.min(filteredMembers.length, membersMaxRows)} of {filteredMembers.length}</span>
             </div>
 
             <div style={{maxHeight:400, overflow:'auto'}}>
@@ -963,7 +1042,7 @@ export default function App(){
                   </tr>
                 </thead>
                 <tbody>
-                  {members.map(m=> (
+                  {filteredMembers.slice(0, membersMaxRows).map(m=> (
                     <tr key={m.id} onClick={()=>{ setEditingMember(m); setMemberForm({...m}); setShowMemberForm(true); }} style={{cursor:'pointer'}}>
                       {(showAllMemberCols? (membersFields || []).map(h=> <td key={h}>{m[h]!==null&&m[h]!==undefined? String(m[h]): ''}</td>) : [m.sno, m.MEMBER_NAME, m.MEMBER_ID, m.PHONE, m.church].map((v,i)=> <td key={i}>{v||''}</td>))}
                     </tr>
@@ -1080,8 +1159,17 @@ export default function App(){
         {page==='members_collections' && (
           <div>
             <h3>Members Collections</h3>
-            <div style={{marginBottom:8, display:'flex', gap:8, alignItems:'center'}}>
+            <div style={{marginBottom:8, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
               <button onClick={fetchMembersCollections}>Refresh</button>
+              <label>Search in</label>
+              <select value={mcSearchField} onChange={e=>{ setMcSearchField(e.target.value); setMcPage(1) }}>
+                <option value='all'>All fields</option>
+                <option value='collection_code'>Collection Code</option>
+                <option value='s4'>Member Name</option>
+                <option value='member_id'>Member ID</option>
+                <option value='s1'>S1</option>
+                <option value='church'>Church</option>
+              </select>
               <input placeholder='Search' value={mcFilterText} onChange={e=>{ setMcFilterText(e.target.value); setMcPage(1) }} />
               <select value={mcFilterCode} onChange={e=>{ setMcFilterCode(e.target.value); setMcPage(1) }}>
                 <option value=''>-- all codes --</option>
@@ -1092,9 +1180,9 @@ export default function App(){
               <input type='date' value={mcFrom} onChange={e=>{ setMcFrom(e.target.value); setMcPage(1) }} />
               <label>To</label>
               <input type='date' value={mcTo} onChange={e=>{ setMcTo(e.target.value); setMcPage(1) }} />
-              <label>Page size</label>
+              <label>Max rows</label>
               <select value={mcPageSize} onChange={e=>{ setMcPageSize(Number(e.target.value)); setMcPage(1) }}>
-                {[20,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
+                {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
 
@@ -1120,7 +1208,11 @@ export default function App(){
                         catch(e){ return false }
                       })
                       if(mcFilterText) rows = rows.filter(r => {
-                        try{ return Object.values(r).join(' ').toLowerCase().includes(mcFilterText.toLowerCase()) }catch(e){ return false }
+                        try{
+                          const q = mcFilterText.toLowerCase()
+                          if(mcSearchField === 'all') return Object.values(r).join(' ').toLowerCase().includes(q)
+                          return String(r?.[mcSearchField] ?? '').toLowerCase().includes(q)
+                        }catch(e){ return false }
                       })
                       if(mcFrom){ const dfrom = new Date(mcFrom); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) >= dfrom }catch(e){return false} }) }
                       if(mcTo){ const dto = new Date(mcTo); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) <= dto }catch(e){return false} }) }
@@ -1260,13 +1352,18 @@ export default function App(){
             <h3>Reports</h3>
             <div>
               <h4>Members Collection Report</h4>
-              <div style={{display:'flex', gap:8, alignItems:'center'}}>
+              <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
                 <label>From:</label>
                 <input type='date' value={reportFrom} onChange={e=>setReportFrom(e.target.value)} />
                 <label>To:</label>
                 <input type='date' value={reportTo} onChange={e=>setReportTo(e.target.value)} />
                 <button onClick={fetchMembersCollectionReport}>Run Report</button>
                 <button style={{marginLeft:8}} onClick={async ()=>{ setShowCollectionsInReports(s=>!s); if(!showCollectionsInReports) await fetchMembersCollections(); }}>{showCollectionsInReports? 'Hide Collections':'View Collections'}</button>
+                <label style={{marginLeft:8}}>Max rows</label>
+                <select value={reportMaxRows} onChange={e=>setReportMaxRows(Number(e.target.value))}>
+                  {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
+                </select>
+                <span style={{color:'#666'}}>Showing {Math.min(reportRows.length, reportMaxRows)} of {reportRows.length}</span>
               </div>
               <div style={{maxHeight:400, overflow:'auto', marginTop:8}}>
                 <table style={{width:'100%', borderCollapse:'collapse'}}>
@@ -1278,7 +1375,7 @@ export default function App(){
                   <tbody>
                     {(() => {
                       try{
-                        return (Array.isArray(reportRows)? reportRows : []).map((r,idx)=> (
+                        return (Array.isArray(reportRows)? reportRows : []).slice(0, reportMaxRows).map((r,idx)=> (
                           <tr key={idx}>{Object.keys(r||{}).map(k=> <td key={k} style={{padding:6}}>{String((r&&r[k])||'')}</td>)}</tr>
                         ))
                       }catch(e){
@@ -1305,6 +1402,13 @@ export default function App(){
               {showCollectionsInReports && (
                 <div style={{marginTop:12}}>
                   <h4>Members Collections (Reports)</h4>
+                  <div style={{marginBottom:8,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <label>Max rows</label>
+                    <select value={reportCollectionsMaxRows} onChange={e=>setReportCollectionsMaxRows(Number(e.target.value))}>
+                      {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <span style={{color:'#666'}}>Showing {Math.min((membersCollections||[]).length, reportCollectionsMaxRows)} of {(membersCollections||[]).length}</span>
+                  </div>
                   <div style={{maxHeight:300, overflow:'auto'}}>
                     <table style={{width:'100%', borderCollapse:'collapse'}}>
                       <thead>
@@ -1315,7 +1419,7 @@ export default function App(){
                           try{
                             const rows = Array.isArray(membersCollections)? membersCollections : [];
                             if(rows.length === 0) return <tr><td colSpan={(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).length:9)}>No collection rows</td></tr>
-                            return rows.map(r=> (
+                            return rows.slice(0, reportCollectionsMaxRows).map(r=> (
                               <tr key={r && r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> displayCellValue(k, r)) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5].map(v=> v)).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
                             ))
                           }catch(e){ console.error('Error rendering report collections', e); return <tr><td>Error rendering collections: {String(e.message||e)}</td></tr> }
