@@ -731,14 +731,21 @@ def create_user(
 def verify_user(username: str, password: str) -> Optional[dict]:
     ensure_db_exists()
     with engine.connect() as conn:
-        res = conn.execute(text('SELECT id, username, password_hash, salt, church, role FROM users WHERE username=:u'), {'u': username})
+        res = conn.execute(text('SELECT id, username, password_hash, salt, church, role, first_name, last_name FROM users WHERE username=:u'), {'u': username})
         row = res.fetchone()
         if not row:
             return None
         salt = binascii.unhexlify(row[3])
         ph = _hash_password(password, salt)
         if ph == row[2]:
-            return {'id': row[0], 'username': row[1], 'church': row[4], 'role': row[5]}
+            return {
+                'id': row[0],
+                'username': row[1],
+                'church': row[4],
+                'role': row[5],
+                'first_name': row[6],
+                'last_name': row[7],
+            }
         return None
 
 
@@ -753,7 +760,7 @@ def create_token_for_user(user_id: int) -> str:
 def get_user_by_token(token: str) -> Optional[dict]:
     ensure_db_exists()
     with engine.connect() as conn:
-        res = conn.execute(text('SELECT t.created_at, u.id, u.username, u.church, u.role FROM tokens t JOIN users u ON t.user_id = u.id WHERE t.token = :tok'), {'tok': token})
+        res = conn.execute(text('SELECT t.created_at, u.id, u.username, u.church, u.role, u.first_name, u.last_name FROM tokens t JOIN users u ON t.user_id = u.id WHERE t.token = :tok'), {'tok': token})
         row = res.fetchone()
         if not row:
             return None
@@ -773,7 +780,14 @@ def get_user_by_token(token: str) -> Optional[dict]:
                 # token expired
                 return None
 
-        return {'id': row[1], 'username': row[2], 'church': row[3], 'role': row[4]}
+        return {
+            'id': row[1],
+            'username': row[2],
+            'church': row[3],
+            'role': row[4],
+            'first_name': row[5],
+            'last_name': row[6],
+        }
 
 
 def seed_collection_codes():

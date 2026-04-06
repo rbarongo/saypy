@@ -739,6 +739,14 @@ export default function App(){
     return new Intl.NumberFormat().format(Number(value))
   }
 
+  function displayUserName(u){
+    const first = String(u?.first_name || '').trim()
+    const last = String(u?.last_name || '').trim()
+    const full = [first, last].filter(Boolean).join(' ')
+    if(full) return full
+    return String(u?.username || '')
+  }
+
   const filteredUsers = (usersList || []).filter((u)=>{
     const q = String(usersSearchText || '').trim().toLowerCase()
     if(!q) return true
@@ -792,7 +800,7 @@ export default function App(){
         <h2>{appName}</h2>
         <div>
           <div>
-            <strong>{user.username}</strong> ({user.role})
+            <strong>{displayUserName(user)}</strong> ({user.role})
             <button style={{marginLeft:8}} onClick={()=> setShowOwnPasswordForm(s=>!s)}>{showOwnPasswordForm ? 'Cancel Password Change' : 'Change Password'}</button>
             <button style={{marginLeft:8}} onClick={logout}>Logout</button>
           </div>
