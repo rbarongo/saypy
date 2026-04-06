@@ -539,7 +539,6 @@ export default function App(){
   const [memberForm, setMemberForm] = useState({})
   const [membersFields, setMembersFields] = useState([])
   const [showAllMemberCols, setShowAllMemberCols] = useState(false)
-  const [showCollectionsTable, setShowCollectionsTable] = useState(false)
   const [membersCollections, setMembersCollections] = useState([])
   const [membersCollectionsFields, setMembersCollectionsFields] = useState([])
   const [showCollectionsInReports, setShowCollectionsInReports] = useState(false)
@@ -1302,32 +1301,12 @@ export default function App(){
               </div>
             )}
 
-            {showCollectionsTable && (
-              <div style={{marginTop:12}}>
-                <h4>Members Collections</h4>
-                <div style={{maxHeight:300, overflow:'auto'}}>
-                  <table style={{width:'100%', borderCollapse:'collapse'}}>
-                    <thead>
-                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {membersCollections.map(r=> (
-                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> displayCellValue(k, r)) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5].map(v=> v)).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
         {page==='collections' && (
           <div>
             <h3>Collections — Upload & Manage</h3>
-            <div style={{marginBottom:8}}>
-              <button onClick={()=>{ setShowCollectionsTable(s=>!s); if(!showCollectionsTable) fetchMembersCollections() }}>{showCollectionsTable? 'Hide Collections':'Show Collections'}</button>
-            </div>
             <CollectionsUpload
               token={token}
               authFetch={authFetch}
@@ -1339,23 +1318,6 @@ export default function App(){
               scopedChurchId={currentUserChurchId}
               onRestrictedChurchAttempt={denyRestrictedChurchAccess}
             />
-            {showCollectionsTable && (
-              <div style={{marginTop:12}}>
-                <h4>Members Collections</h4>
-                <div style={{maxHeight:300, overflow:'auto'}}>
-                  <table style={{width:'100%', borderCollapse:'collapse'}}>
-                    <thead>
-                      <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {membersCollections.map(r=> (
-                        <tr key={r.id}><td>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12).map(k=> displayCellValue(k, r)) : [r.id,r.collection_code,r.member_id,r.church,r.s1,r.s2,r.s3,r.s4,r.s5].map(v=> v)).map((v,i)=><span key={i}>{v!==null&&v!==undefined?String(v):''}{i < 8? ' | ' : ''}</span>)}</td></tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
         )}
 

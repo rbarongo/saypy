@@ -118,6 +118,7 @@ def _role_has_right(role: Optional[str], right_flag: str) -> bool:
         return True
     # Backward-compatible fallback if policies are unavailable.
     fallback = {
+        'can_manage_members': {ROLE_ADMIN, ROLE_DATA_STEWARD},
         'can_manage_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER},
         'can_manage_members_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER},
     }
@@ -430,13 +431,13 @@ async def submit_form(table_name: str, request: Request, auth: dict = Depends(re
     if not isinstance(payload, dict) or not payload:
         raise HTTPException(status_code=400, detail="No data provided in request body or form")
 
-    # Legacy endpoint role restrictions by target table.
+    # Enforce table-specific rights to keep menu domains independent.
     if table_name in {"members_collection", "members_collections"}:
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER}, context='collection submission')
+        _require_auth_right(auth, 'can_manage_members_collections', context='members collections submission')
     elif table_name == "members":
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD}, context='member submission')
+        _require_auth_right(auth, 'can_manage_members', context='member submission')
     elif table_name == "collection_codes":
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN}, context='collection code submission')
+        _require_auth_right(auth, 'can_manage_collections', context='collection code submission')
 
     # Normalize: convert single-value lists to values
     row = {k: (v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v) for k, v in payload.items()}
@@ -477,7 +478,7 @@ class MemberCollectionIn(BaseModel):
 @app.post('/members')
 def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     """Create a member record and return its id."""
-    _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD}, context='member creation')
+    _require_auth_right(auth, 'can_manage_members', context='member creation')
     actor_church = _auth_context_church(auth)
     effective_church = _enforce_church_scope(payload.church, actor_church, context='member creation')
     pk = insert_member(
@@ -506,6 +507,7 @@ def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_use
 @app.post('/members_collection')
 def create_members_collection(payload: MemberCollectionIn, auth: dict = Depends(require_api_key_or_user)):
     """Create a members_collection row. `member_id` may be omitted if you will link later."""
+    _require_auth_right(auth, 'can_manage_members_collections', context='members collections creation')
     actor_church = _auth_context_church(auth)
     if actor_church is not None:
         raise HTTPException(status_code=400, detail='Use /members_collections/bulk for church-scoped inserts')
@@ -1344,7 +1346,7 @@ def update_collection_code(code_id: int, payload: CollectionCodeIn):
 @app.get('/members')
 def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     try:
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD, ROLE_TREASURER, ROLE_UPLOADER, ROLE_VIEWER}, context='members listing')
+        _require_auth_right(auth, 'can_manage_members', context='members listing')
         df = pd.read_sql_table('members', con=engine)
         actor_church = _auth_context_church(auth)
         if actor_church is not None and 'church' in df.columns:
@@ -1369,7 +1371,7 @@ def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_o
 @app.put('/members/{member_id}')
 def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     try:
-        _require_auth_roles(auth, {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_DATA_STEWARD}, context='member update')
+        _require_auth_right(auth, 'can_manage_members', context='member update')
         actor_church = _auth_context_church(auth)
         if actor_church is not None:
             with engine.connect() as conn:
