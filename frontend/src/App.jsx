@@ -637,7 +637,15 @@ export default function App(){
     return fetch(url, {...opts, headers: h})
   }
 
-  async function fetchCodes(){ try{ const res = await fetch('http://localhost:8000/collection_codes'); const data = await res.json(); setCollectionCodes(data) }catch(e){} }
+  async function fetchCodes(){
+    try{
+      const res = await authFetch('http://localhost:8000/collection_codes')
+      const data = await res.json().catch(()=>[])
+      setCollectionCodes(Array.isArray(data) ? data : [])
+    }catch(e){
+      setCollectionCodes([])
+    }
+  }
   async function fetchMembersLocal(){
     try{
       const res = await authFetch('http://localhost:8000/members')
