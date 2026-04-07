@@ -933,8 +933,9 @@ export default function App(){
 
   function displayUserName(u){
     const first = String(u?.first_name || '').trim()
+    const middle = String(u?.middle_name || '').trim()
     const last = String(u?.last_name || '').trim()
-    const full = [first, last].filter(Boolean).join(' ')
+    const full = [first, middle, last].filter(Boolean).join(' ')
     if(full) return full
     return String(u?.username || '')
   }
@@ -1824,7 +1825,15 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   const totalSteps = 5
 
   useEffect(()=>{ fetchCodes() }, [])
-  useEffect(()=>{ if(user && !uploaderName) setUploaderName(user.username) }, [user])
+  useEffect(()=>{
+    if(user && !uploaderName){
+      const first = String(user?.first_name || '').trim()
+      const middle = String(user?.middle_name || '').trim()
+      const last = String(user?.last_name || '').trim()
+      const full = [first, middle, last].filter(Boolean).join(' ')
+      setUploaderName(full || String(user?.username || ''))
+    }
+  }, [user])
   useEffect(()=>{
     if(scopedChurchId !== null && scopedChurchId !== undefined && !Number.isNaN(Number(scopedChurchId))){
       setSelectedChurch(String(scopedChurchId))
@@ -1865,6 +1874,17 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
 
   function currentChurchNameLocal(){
     return (churches || []).find(c=> Number(c.id)===Number(selectedChurch || scopedChurchId))?.name || String(selectedChurch || scopedChurchId || '-')
+  }
+
+  function formatPreviewDate(value){
+    if(!value) return '-'
+    const dt = new Date(value)
+    if(Number.isNaN(dt.getTime())) return String(value)
+    return new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(dt)
   }
 
   const visibleChurches = (churches || []).filter(c=> canAccessChurch(c.id))
@@ -2100,10 +2120,19 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       {step===3 && (
         <div>
           <h4>Mapped preview ({mappedPreview.length} rows)</h4>
-          <div style={{marginBottom:10, display:'flex', gap:12, flexWrap:'wrap', alignItems:'center', padding:'10px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#f8fafc'}}>
-            <div><strong>Church:</strong> <span style={{color:'#111827', fontWeight:600}}>{currentChurchNameLocal()}</span></div>
-            <div><strong>Tarehe:</strong> <span style={{color:'#111827', fontWeight:600}}>{selectedDate || '-'}</span></div>
-            <div><strong>Source:</strong> <span style={{color:'#111827', fontWeight:600}}>{uploaderName || '-'}</span></div>
+          <div style={{marginBottom:10, display:'flex', gap:16, flexWrap:'wrap', alignItems:'stretch', padding:'12px 14px', border:'1px solid #d1d5db', borderRadius:8, background:'#f8fafc'}}>
+            <div style={{display:'flex', flexDirection:'column', minWidth:180}}>
+              <div style={{fontSize:12, fontWeight:800, letterSpacing:'0.05em', textTransform:'uppercase', color:'#475569'}}>Church</div>
+              <div style={{color:'#111827', fontWeight:700, fontSize:16, lineHeight:1.4}}>{currentChurchNameLocal()}</div>
+            </div>
+            <div style={{display:'flex', flexDirection:'column', minWidth:180}}>
+              <div style={{fontSize:12, fontWeight:800, letterSpacing:'0.05em', textTransform:'uppercase', color:'#475569'}}>Tarehe</div>
+              <div style={{color:'#111827', fontWeight:700, fontSize:16, lineHeight:1.4}}>{formatPreviewDate(selectedDate)}</div>
+            </div>
+            <div style={{display:'flex', flexDirection:'column', minWidth:220}}>
+              <div style={{fontSize:12, fontWeight:800, letterSpacing:'0.05em', textTransform:'uppercase', color:'#475569'}}>Source</div>
+              <div style={{color:'#111827', fontWeight:700, fontSize:16, lineHeight:1.4}}>{uploaderName || '-'}</div>
+            </div>
           </div>
           <div style={{maxHeight:420, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:8}}>
             <table style={{width:'100%', minWidth:'max-content', borderCollapse:'separate', borderSpacing:0}}>
