@@ -574,6 +574,9 @@ export default function App(){
   const [membersSearchField, setMembersSearchField] = useState('all')
   const [membersSearchText, setMembersSearchText] = useState('')
   const [membersQ, setMembersQ] = useState('')
+  const [membersExtraFilters, setMembersExtraFilters] = useState([])
+  const [membersSortKey, setMembersSortKey] = useState('sno')
+  const [membersSortDir, setMembersSortDir] = useState('asc')
   async function fetchMembers(q=''){
     try{
       const url = q? `http://localhost:8000/members?q=${encodeURIComponent(q)}` : 'http://localhost:8000/members'
@@ -584,6 +587,10 @@ export default function App(){
         // derive fields from first row, exclude internal timestamps
         const keys = Object.keys(data[0]).filter(k=> k !== 'created_at' && k !== 'id')
         setMembersFields(keys)
+        if(!membersVisibleCols.length){
+          const defaults = ['sno','MEMBER_NAME','MEMBER_ID','PHONE','church'].filter(k=> keys.includes(k))
+          setMembersVisibleCols(defaults.length ? defaults : keys)
+        }
       }
     }catch(e){ setStatus('Failed to load members: '+e.message) }
   }
@@ -602,6 +609,12 @@ export default function App(){
   const [memberForm, setMemberForm] = useState({})
   const [membersFields, setMembersFields] = useState([])
   const [showAllMemberCols, setShowAllMemberCols] = useState(false)
+  const [membersVisibleCols, setMembersVisibleCols] = useState([])
+  const [showMembersColumnPicker, setShowMembersColumnPicker] = useState(false)
+  const [membersPickerLeft, setMembersPickerLeft] = useState([])
+  const [membersPickerRight, setMembersPickerRight] = useState([])
+  const [membersPickerLeftSelected, setMembersPickerLeftSelected] = useState(new Set())
+  const [membersPickerRightSelected, setMembersPickerRightSelected] = useState(new Set())
   const [membersCollections, setMembersCollections] = useState([])
   const [membersCollectionsFields, setMembersCollectionsFields] = useState([])
   const [showCollectionsInReports, setShowCollectionsInReports] = useState(false)
@@ -643,6 +656,21 @@ export default function App(){
   useEffect(()=>{
     if(page==='members') fetchMembers('')
   }, [page])
+
+  useEffect(()=>{
+    const prefKey = membersPrefColumnsKey()
+    if(!prefKey || !membersFields.length) return
+    try{
+      const raw = localStorage.getItem(prefKey)
+      if(!raw) return
+      const parsed = JSON.parse(raw)
+      if(Array.isArray(parsed)){
+        const allowed = new Set(getMembersAllColumns())
+        const cols = parsed.filter(c=> allowed.has(c))
+        if(cols.length) setMembersVisibleCols(cols)
+      }
+    }catch(e){}
+  }, [user?.id, user?.username, membersFields.join('|')])
 
   // Load members_collections when navigating to the Members Collections page
   useEffect(()=>{
@@ -983,6 +1011,194 @@ export default function App(){
       .replace(/'/g, '&#39;')
   }
 
+  function membersPrefUserKey(){
+    return String(user?.id || user?.username || '').trim()
+  }
+
+  function membersPrefColumnsKey(){
+    const k = membersPrefUserKey()
+    return k ? `saypy.members.visibleCols.${k}` : ''
+  }
+
+  function memberLabelForColumn(col){
+    if(!col) return ''
+    const found = collectionCodeMeta(col)
+    if(found){
+      return found.custom_collection_name || found.code || found.column_name || col
+    }
+    const map = {
+      sno: 'S/N',
+      MEMBER_NAME: 'Member Name',
+      MEMBER_ID: 'Member ID',
+      PHONE: 'Phone',
+      church: 'Church',
+    }
+    return map[col] || col
+  }
+
+  function getMembersAllColumns(){
+    return (membersFields && membersFields.length) ? membersFields : ['sno','MEMBER_NAME','MEMBER_ID','PHONE','church']
+  }
+
+  function getMembersDisplayColumns(){
+    const all = getMembersAllColumns()
+    if(!membersVisibleCols.length){
+      return ['sno','MEMBER_NAME','MEMBER_ID','PHONE','church'].filter(c=> all.includes(c))
+    }
+    const cols = membersVisibleCols.filter(c=> all.includes(c))
+    return cols.length ? cols : all
+  }
+
+  function memberDisplayCellValue(k, row){
+    if(!row) return ''
+    if(k === 'church'){
+      return (churches||[]).find(c=> Number(c.id)===Number(row?.church))?.name || row?.church || ''
+    }
+    const v = row[k]
+    return v===null||v===undefined ? '' : String(v)
+  }
+
+  function membersFilterableFields(){
+    const all = getMembersAllColumns()
+    const extras = ['church_name']
+    return Array.from(new Set([...all, ...extras]))
+  }
+
+  function membersFieldLabel(field){
+    if(field === 'church_name') return 'Church Name'
+    return memberLabelForColumn(field)
+  }
+
+  function membersFieldValue(row, field){
+    if(field === 'church_name'){
+      return (churches||[]).find(c=> Number(c.id)===Number(row?.church))?.name || ''
+    }
+    return row?.[field]
+  }
+
+  function addMembersFilter(){
+    const firstField = membersFilterableFields()[0] || 'MEMBER_NAME'
+    setMembersExtraFilters(prev => [...prev, { id: Date.now() + Math.random(), field: firstField, op: 'contains', value: '' }])
+  }
+
+  function updateMembersFilter(id, patch){
+    setMembersExtraFilters(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f))
+  }
+
+  function removeMembersFilter(id){
+    setMembersExtraFilters(prev => prev.filter(f => f.id !== id))
+  }
+
+  function clearMembersFilters(){
+    setMembersExtraFilters([])
+  }
+
+  function openMembersColumnPicker(){
+    const all = getMembersAllColumns()
+    const current = getMembersDisplayColumns()
+    setMembersPickerLeft(all.filter(c=> !current.includes(c)))
+    setMembersPickerRight(current)
+    setMembersPickerLeftSelected(new Set())
+    setMembersPickerRightSelected(new Set())
+    setShowMembersColumnPicker(true)
+  }
+
+  function moveMembersColumnsToRight(){
+    const selected = Array.from(membersPickerLeftSelected)
+    if(!selected.length) return
+    setMembersPickerLeft(membersPickerLeft.filter(c=> !selected.includes(c)))
+    setMembersPickerRight([...membersPickerRight, ...selected.filter(c=> !membersPickerRight.includes(c))])
+    setMembersPickerLeftSelected(new Set())
+  }
+
+  function moveMembersColumnsToLeft(){
+    const selected = Array.from(membersPickerRightSelected)
+    if(!selected.length) return
+    setMembersPickerRight(membersPickerRight.filter(c=> !selected.includes(c)))
+    setMembersPickerLeft([...membersPickerLeft, ...selected.filter(c=> !membersPickerLeft.includes(c))])
+    setMembersPickerRightSelected(new Set())
+  }
+
+  function moveMembersColumnUp(){
+    const selected = Array.from(membersPickerRightSelected)
+    if(selected.length !== 1) return
+    const col = selected[0]
+    const idx = membersPickerRight.findIndex(c=> c===col)
+    if(idx <= 0) return
+    const next = [...membersPickerRight]
+    const swap = next[idx-1]
+    next[idx-1] = next[idx]
+    next[idx] = swap
+    setMembersPickerRight(next)
+    setMembersPickerRightSelected(new Set([col]))
+  }
+
+  function moveMembersColumnDown(){
+    const selected = Array.from(membersPickerRightSelected)
+    if(selected.length !== 1) return
+    const col = selected[0]
+    const idx = membersPickerRight.findIndex(c=> c===col)
+    if(idx < 0 || idx >= membersPickerRight.length - 1) return
+    const next = [...membersPickerRight]
+    const swap = next[idx+1]
+    next[idx+1] = next[idx]
+    next[idx] = swap
+    setMembersPickerRight(next)
+    setMembersPickerRightSelected(new Set([col]))
+  }
+
+  function applyMembersColumnSelection(){
+    setMembersVisibleCols(membersPickerRight)
+    setShowMembersColumnPicker(false)
+  }
+
+  function saveMembersColumnSelection(){
+    const prefKey = membersPrefColumnsKey()
+    if(!prefKey){ setStatus('Could not save members columns for this user'); return }
+    try{
+      localStorage.setItem(prefKey, JSON.stringify(getMembersDisplayColumns()))
+      setStatus('Members column selection saved for this user')
+    }catch(e){
+      setStatus('Failed to save members column selection: ' + (e?.message || String(e)))
+    }
+  }
+
+  function exportMembersExcel(){
+    try{
+      const cols = getMembersDisplayColumns()
+      const rows = filteredMembers.slice(0, membersMaxRows)
+      const head = cols.map(c=>`<th>${escapeHtml(memberLabelForColumn(c))}</th>`).join('')
+      const body = rows.map(r=> `<tr>${cols.map(c=> `<td>${escapeHtml(memberDisplayCellValue(c, r))}</td>`).join('')}</tr>`).join('')
+      const table = `<table border="1"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+      const html = `<!doctype html><html><head><meta charset="utf-8" /></head><body>${table}</body></html>`
+      const blob = new Blob([html], { type: 'application/vnd.ms-excel' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const stamp = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')
+      a.href = url
+      a.download = `members_${currentUserChurchId || 'all'}_${stamp}.xls`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }catch(e){ setStatus('Export Members Excel failed: ' + (e?.message || String(e))) }
+  }
+
+  function exportMembersPdf(){
+    try{
+      const cols = getMembersDisplayColumns()
+      const rows = filteredMembers.slice(0, membersMaxRows)
+      const head = cols.map(c=>`<th style="border:1px solid #ccc;padding:6px;text-align:left">${escapeHtml(memberLabelForColumn(c))}</th>`).join('')
+      const body = rows.map(r=> `<tr>${cols.map(c=> `<td style="border:1px solid #ddd;padding:6px">${escapeHtml(memberDisplayCellValue(c, r))}</td>`).join('')}</tr>`).join('')
+      const win = window.open('', '_blank')
+      if(!win){ setStatus('Pop-up blocked. Allow pop-ups to export PDF.'); return }
+      win.document.write(`<!doctype html><html><head><title>Members</title><style>body{font-family:Arial,sans-serif;padding:12px}table{border-collapse:collapse;width:100%;font-size:12px}h3{margin:0 0 10px 0}</style></head><body><h3>Members (Church ${escapeHtml(currentUserChurchId || '-')})</h3><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`)
+      win.document.close()
+      win.focus()
+      win.print()
+    }catch(e){ setStatus('Export Members PDF failed: ' + (e?.message || String(e))) }
+  }
+
   function exportMembersCollectionsExcel(){
     try{
       const cols = getMcDisplayColumns()
@@ -1290,20 +1506,48 @@ export default function App(){
     return String(bag[usersSearchField] ?? bag.all).toLowerCase().includes(q)
   })
 
-  const filteredMembers = (members || []).filter((m)=>{
-    const q = String(membersSearchText || '').trim().toLowerCase()
-    if(!q) return true
-    const churchName = (churches||[]).find(c=> Number(c.id)===Number(m?.church))?.name || m?.church || ''
-    const bag = {
-      name: m?.MEMBER_NAME || '',
-      member_id: m?.MEMBER_ID ?? '',
-      phone: m?.PHONE || '',
-      church: String(churchName || ''),
-      sno: m?.sno ?? '',
-      all: [m?.sno, m?.MEMBER_NAME, m?.MEMBER_ID, m?.PHONE, churchName].join(' '),
-    }
-    return String(bag[membersSearchField] ?? bag.all).toLowerCase().includes(q)
-  })
+  const filteredMembers = (members || [])
+    .filter((m)=>{
+      const q = String(membersSearchText || '').trim().toLowerCase()
+      const churchName = (churches||[]).find(c=> Number(c.id)===Number(m?.church))?.name || m?.church || ''
+      const bag = {
+        name: m?.MEMBER_NAME || '',
+        member_id: m?.MEMBER_ID ?? '',
+        phone: m?.PHONE || '',
+        church: String(churchName || ''),
+        sno: m?.sno ?? '',
+        all: [m?.sno, m?.MEMBER_NAME, m?.MEMBER_ID, m?.PHONE, churchName].join(' '),
+      }
+      const basicMatch = !q || String(bag[membersSearchField] ?? bag.all).toLowerCase().includes(q)
+      if(!basicMatch) return false
+
+      if(!membersExtraFilters.length) return true
+      return membersExtraFilters.every(f=>{
+        const field = f?.field
+        const op = String(f?.op || 'contains')
+        const needle = String(f?.value ?? '').trim().toLowerCase()
+        if(!field || !needle) return true
+        const hay = String(membersFieldValue(m, field) ?? '').toLowerCase()
+        if(op === 'equals') return hay === needle
+        if(op === 'starts_with') return hay.startsWith(needle)
+        if(op === 'ends_with') return hay.endsWith(needle)
+        return hay.includes(needle)
+      })
+    })
+    .slice()
+    .sort((a,b)=>{
+      const av = membersFieldValue(a, membersSortKey)
+      const bv = membersFieldValue(b, membersSortKey)
+      const an = Number(av)
+      const bn = Number(bv)
+      let cmp = 0
+      if(!Number.isNaN(an) && !Number.isNaN(bn) && String(av).trim() !== '' && String(bv).trim() !== ''){
+        cmp = an - bn
+      }else{
+        cmp = String(av ?? '').localeCompare(String(bv ?? ''), undefined, { numeric: true, sensitivity: 'base' })
+      }
+      return membersSortDir === 'asc' ? cmp : -cmp
+    })
 
   // If not authenticated, show a focused login screen (no menu)
   if(!user){
@@ -1694,26 +1938,128 @@ export default function App(){
                 <option value='sno'>SNO</option>
               </select>
               <input placeholder='Filter loaded members...' value={membersSearchText} onChange={e=>setMembersSearchText(e.target.value)} />
+              <button onClick={addMembersFilter}>Add Field Filter</button>
+              <button onClick={clearMembersFilters}>Clear Field Filters</button>
               <button style={{marginLeft:8}} onClick={()=>{ setEditingMember(null); setMemberForm({}); setShowMemberForm(true); }}>New Member</button>
-              <label style={{marginLeft:12}}><input type='checkbox' checked={showAllMemberCols} onChange={e=>setShowAllMemberCols(e.target.checked)} /> Show all columns</label>
+              <button style={{marginLeft:12}} onClick={openMembersColumnPicker}>Column Picker</button>
+              <button onClick={saveMembersColumnSelection}>Save Selection</button>
+              <button onClick={exportMembersExcel}>Export Excel</button>
+              <button onClick={exportMembersPdf}>Export PDF</button>
               <label style={{marginLeft:12}}>Max rows</label>
               <select value={membersMaxRows} onChange={e=>setMembersMaxRows(Number(e.target.value))}>
                 {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
               </select>
-              <span style={{color:'#666'}}>Showing {Math.min(filteredMembers.length, membersMaxRows)} of {filteredMembers.length}</span>
+              <span style={{color:'#666'}}>Showing {Math.min(filteredMembers.length, membersMaxRows)} of {filteredMembers.length} (filters: {membersExtraFilters.length})</span>
             </div>
+
+            {membersExtraFilters.length > 0 && (
+              <div style={{marginBottom:10,padding:'10px 12px',border:'1px solid #ddd',borderRadius:8,background:'#f8fafc'}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>Field Filters (AND logic)</div>
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  {membersExtraFilters.map(f => (
+                    <div key={f.id} style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                      <select value={f.field} onChange={e=>updateMembersFilter(f.id, { field: e.target.value })}>
+                        {membersFilterableFields().map(col => <option key={col} value={col}>{membersFieldLabel(col)}</option>)}
+                      </select>
+                      <select value={f.op} onChange={e=>updateMembersFilter(f.id, { op: e.target.value })}>
+                        <option value='contains'>contains</option>
+                        <option value='equals'>equals</option>
+                        <option value='starts_with'>starts with</option>
+                        <option value='ends_with'>ends with</option>
+                      </select>
+                      <input placeholder='value...' value={f.value} onChange={e=>updateMembersFilter(f.id, { value: e.target.value })} />
+                      <button onClick={()=>removeMembersFilter(f.id)}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{marginBottom:10,padding:'10px 12px',border:'1px solid #ddd',borderRadius:8,background:'#f8fafc'}}>
+              <span style={{fontSize:12,color:'#334155',fontWeight:600}}>
+                Showing: {getMembersDisplayColumns().map(memberLabelForColumn).join(', ')}
+              </span>
+            </div>
+
+            {showMembersColumnPicker && (
+              <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
+                <div style={{background:'#fff',borderRadius:8,padding:24,maxWidth:800,width:'90%',maxHeight:'90vh',overflow:'auto',boxShadow:'0 10px 40px rgba(0,0,0,0.3)'}}>
+                  <h3 style={{marginTop:0,marginBottom:20,fontSize:18,fontWeight:800,color:'#111827'}}>Members Column Picker</h3>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',gap:16,marginBottom:20}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:800,marginBottom:8,color:'#111827'}}>AVAILABLE COLUMNS</div>
+                      <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:260,maxHeight:360,overflowY:'auto',background:'#fafafa'}}>
+                        {membersPickerLeft.length === 0 ? (
+                          <div style={{padding:12,textAlign:'center',color:'#475569',fontSize:12,fontWeight:600}}>No available columns</div>
+                        ) : membersPickerLeft.map(col => (
+                          <div key={col} onClick={()=>{
+                            const next = new Set(membersPickerLeftSelected)
+                            if(next.has(col)) next.delete(col); else next.add(col)
+                            setMembersPickerLeftSelected(next)
+                          }} style={{padding:'10px 12px',borderBottom:'1px solid #e5e5e5',cursor:'pointer',background:membersPickerLeftSelected.has(col) ? '#e3f2fd' : '#fafafa',fontSize:13,color:'#111827',fontWeight:600,userSelect:'none'}}>
+                            {memberLabelForColumn(col)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column',justifyContent:'center',gap:8}}>
+                      <button onClick={moveMembersColumnsToRight} disabled={membersPickerLeftSelected.size===0}>Add -&gt;</button>
+                      <button onClick={moveMembersColumnsToLeft} disabled={membersPickerRightSelected.size===0}>&lt;- Remove</button>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:800,marginBottom:8,color:'#111827'}}>SELECTED COLUMNS</div>
+                      <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:260,maxHeight:360,overflowY:'auto',background:'#f0f9ff'}}>
+                        {membersPickerRight.length === 0 ? (
+                          <div style={{padding:12,textAlign:'center',color:'#475569',fontSize:12,fontWeight:600}}>No selected columns</div>
+                        ) : membersPickerRight.map((col, idx) => (
+                          <div key={col} onClick={()=>{
+                            const next = new Set(membersPickerRightSelected)
+                            if(next.has(col)) next.delete(col); else next.add(col)
+                            setMembersPickerRightSelected(next)
+                          }} style={{padding:'10px 12px',borderBottom:'1px solid #e5e5e5',cursor:'pointer',background:membersPickerRightSelected.has(col) ? '#bbdefb' : '#f0f9ff',fontSize:13,color:'#111827',fontWeight:600,userSelect:'none',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <span>{memberLabelForColumn(col)}</span>
+                            <span style={{fontSize:11,color:'#334155',fontWeight:700}}>{idx + 1}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {membersPickerRightSelected.size === 1 && (
+                        <div style={{marginTop:8,display:'flex',gap:6}}>
+                          <button onClick={moveMembersColumnUp} style={{flex:1}}>Move Up</button>
+                          <button onClick={moveMembersColumnDown} style={{flex:1}}>Move Down</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+                    <button onClick={()=>setShowMembersColumnPicker(false)}>Cancel</button>
+                    <button onClick={applyMembersColumnSelection}>Apply</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div style={mainGridWrapStyle(400)}>
               <table style={mainGridTableStyle(true)}>
                 <thead>
                   <tr>
-                    {(showAllMemberCols? (membersFields || []) : ['sno','MEMBER_NAME','MEMBER_ID','PHONE','church']).map(h=> <th key={h}>{h}</th>)}
+                    {getMembersDisplayColumns().map(h=> (
+                      <th key={h} style={{cursor:'pointer'}} onClick={()=>{
+                        if(membersSortKey === h){
+                          setMembersSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                        }else{
+                          setMembersSortKey(h)
+                          setMembersSortDir('asc')
+                        }
+                      }}>
+                        {memberLabelForColumn(h)} {membersSortKey===h ? (membersSortDir==='asc' ? '▲' : '▼') : ''}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredMembers.slice(0, membersMaxRows).map(m=> (
                     <tr key={m.id} onClick={()=>{ setEditingMember(m); setMemberForm({...m}); setShowMemberForm(true); }} style={{cursor:'pointer'}}>
-                      {(showAllMemberCols? (membersFields || []).map(h=> <td key={h}>{m[h]!==null&&m[h]!==undefined? String(m[h]): ''}</td>) : [m.sno, m.MEMBER_NAME, m.MEMBER_ID, m.PHONE, m.church].map((v,i)=> <td key={i}>{v||''}</td>))}
+                      {getMembersDisplayColumns().map(h=> <td key={h}>{memberDisplayCellValue(h, m)}</td>)}
                     </tr>
                   ))}
                 </tbody>
