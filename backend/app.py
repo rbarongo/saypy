@@ -1591,7 +1591,7 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
 def report_members_collections(start_date: Optional[str] = None, end_date: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
     """Return members_collection rows, optionally filtered by s2 (date) range. Dates in ISO format."""
     try:
-        _require_auth_right(auth, 'can_manage_members_collections', context='members collections access')
+        _require_auth_any_right(auth, {'can_manage_members_collections', 'can_view_reports'}, context='members collections access')
         # Read full table into pandas then filter by s2 in Python to avoid SQL param dialect issues
         df = pd.read_sql_table('members_collection', con=engine)
         actor_church = _auth_context_church(auth)

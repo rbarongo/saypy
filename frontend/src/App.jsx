@@ -1132,10 +1132,21 @@ export default function App(){
   }
 
   function hasRoleRight(flag, fallback=false){
-    if(String(user?.role || '').toLowerCase() === 'system_admin') return true
+    const role = String(user?.role || '').toLowerCase()
+    if(role === 'system_admin') return true
+    const compatibility = {
+      can_manage_members_collections: new Set(['admin','treasurer','data_steward','uploader','viewer']),
+      can_view_collection_codes: new Set(['admin','treasurer','uploader','viewer']),
+      can_manage_collections: new Set(['admin','treasurer','uploader']),
+      can_manage_members: new Set(['admin','data_steward']),
+      can_view_reports: new Set(['admin','treasurer','data_steward','viewer']),
+    }
     const rp = currentRolePolicy()
     if(!rp) return fallback
-    return !!rp[flag]
+    const explicit = !!rp[flag]
+    if(explicit) return true
+    if(!!rp.system_protected && compatibility[flag] && compatibility[flag].has(role)) return true
+    return false
   }
 
   function displayUserName(u){
