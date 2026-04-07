@@ -652,7 +652,7 @@ export default function App(){
       setMcPage(1)
       setMcPageSize(10)
       setStatus('Loading collections...')
-      fetchMembersCollections({ limit: 10 }).then(()=>{
+      fetchMembersCollections({ limit: getDefaultMcFetchLimit(1, 10) }).then(()=>{
         // Keep error/status set by fetchMembersCollections when request fails.
       }).catch(()=>{})
     }
@@ -767,6 +767,12 @@ export default function App(){
     return v===null||v===undefined? '': String(v);
   }
 
+  function getDefaultMcFetchLimit(targetPage = mcPage, targetPageSize = mcPageSize){
+    const pageNum = Math.max(1, Number(targetPage) || 1)
+    const pageSizeNum = Math.max(1, Number(targetPageSize) || 10)
+    return Math.max(10, pageNum * pageSizeNum)
+  }
+
   function authFetch(url, opts={}){
     const h = opts.headers? {...opts.headers} : {}
     if(token) h['Authorization'] = `Bearer ${token}`
@@ -838,8 +844,8 @@ export default function App(){
           setMcVisibleCols(defaultVisible.length ? defaultVisible : keys)
         }
       }
-      return true
-    }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]); return false }
+      return enriched.length
+    }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]); return 0 }
   }
 
   function getMcAllColumns(){
@@ -1898,7 +1904,7 @@ export default function App(){
                 to: mcApplied.to,
                 amountMin: mcApplied.amountMin,
                 amountMax: mcApplied.amountMax,
-              } : { limit: 10 })}>Refresh</button>
+              } : { limit: getDefaultMcFetchLimit(mcPage, mcPageSize) })}>Refresh</button>
               <label>Search in</label>
               <select value={mcSearchField} onChange={e=>setMcSearchField(e.target.value)}>
                 <option value='all'>All fields</option>
@@ -1965,10 +1971,17 @@ export default function App(){
                 setMcTo('')
                 setMcApplied({ searchField: 'all', text: '', code: '', memberId: '', memberName: '', s1: '', amountMin: '', amountMax: '', from: '', to: '' })
                 setMcPage(1)
-                fetchMembersCollections({ limit: 10 })
+                fetchMembersCollections({ limit: getDefaultMcFetchLimit(1, mcPageSize) })
               }}>Clear</button>
               <label>Max rows</label>
-              <select value={mcPageSize} onChange={e=>{ setMcPageSize(Number(e.target.value)); setMcPage(1) }}>
+              <select value={mcPageSize} onChange={async e=>{
+                const nextSize = Number(e.target.value)
+                setMcPageSize(nextSize)
+                setMcPage(1)
+                if(!hasActiveMcFilters()){
+                  await fetchMembersCollections({ limit: getDefaultMcFetchLimit(1, nextSize) })
+                }
+              }}>
                 {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
               </select>
               <button onClick={exportMembersCollectionsExcel}>Export Excel</button>
@@ -2158,10 +2171,20 @@ export default function App(){
             <div style={{marginTop:8}}>
               <button onClick={()=> setMcPage(p=> Math.max(1,p-1))} disabled={mcPage<=1}>Prev</button>
               <span style={{margin:'0 8px'}}>Page {mcPage} / {Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))} ({getFilteredMembersCollectionsRows().length} records)</span>
-              <button onClick={()=> setMcPage(p=> {
-                const pages = Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))
-                return Math.min(pages, p+1)
-              })} disabled={mcPage >= Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))}>Next</button>
+              <button onClick={async ()=>{
+                if(hasActiveMcFilters()){
+                  setMcPage(p=> {
+                    const pages = Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))
+                    return Math.min(pages, p+1)
+                  })
+                  return
+                }
+                const nextPage = mcPage + 1
+                const count = await fetchMembersCollections({ limit: getDefaultMcFetchLimit(nextPage, mcPageSize) })
+                if(count > (nextPage - 1) * mcPageSize){
+                  setMcPage(nextPage)
+                }
+              }} disabled={hasActiveMcFilters() ? mcPage >= Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize)) : getFilteredMembersCollectionsRows().length < mcPage * mcPageSize}>Next</button>
             </div>
 
             {/* Edit modal */}
