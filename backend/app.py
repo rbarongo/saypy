@@ -1327,6 +1327,39 @@ def create_church_collection_code(church_id: int, payload: CollectionCodeIn, cur
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get('/churches/{church_id}/collection_codes')
+def list_church_collection_codes(church_id: int, current_user: dict = Depends(get_current_user)):
+    """List collection codes for a specific church.
+
+    Returns both local church codes and global shared codes, with local first.
+    """
+    try:
+        user_church = current_user.get('church')
+        if not (_role_has_right(current_user.get('role'), 'can_manage_collections') or _role_has_right(current_user.get('role'), 'can_view_collection_codes')):
+            raise HTTPException(status_code=403, detail='Not authorized for collection code viewing')
+        if not _is_system_admin_user(current_user) and user_church != church_id:
+            raise HTTPException(status_code=403, detail='You can only view codes for your own church')
+
+        with engine.connect() as conn:
+            result = conn.execute(
+                text('''
+                    SELECT *
+                    FROM collection_codes
+                    WHERE church = :church_id OR church IS NULL
+                    ORDER BY CASE WHEN church = :church_id THEN 0 WHEN church IS NULL THEN 1 ELSE 2 END, id
+                '''),
+                {'church_id': church_id}
+            )
+            rows = result.fetchall()
+            out = [dict(row) for row in rows]
+
+        return [{k: _serializable_value(v) for k, v in r.items()} for r in out]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.put('/churches/{church_id}/collection_codes/{code_id}')
 def update_church_collection_code(church_id: int, code_id: int, payload: CollectionCodeIn, current_user: dict = Depends(get_current_user)):
     """Update a church-specific collection code for users with collection rights."""

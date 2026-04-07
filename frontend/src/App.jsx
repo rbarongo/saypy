@@ -261,8 +261,8 @@ export default function App(){
   async function fetchLocalCodes(){
     try{
       if(!currentUserChurchId){ return }
-      // Show church-specific codes plus global shared codes.
-      const res = await fetch('http://localhost:8000/collection_codes', { headers: authHeaders() })
+      // Fetch church-scoped codes directly from backend (local + global).
+      const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes`, { headers: authHeaders() })
       const data = await res.json().catch(()=>[])
       if(res.ok){
         const localCodes = data
@@ -274,8 +274,10 @@ export default function App(){
             return Number(a.id||0) - Number(b.id||0)
           })
         setLocalCollectionCodes(localCodes)
+      } else {
+        setStatus('Failed to load collection codes: ' + (data?.detail || `HTTP ${res.status}`))
       }
-    }catch(e){ /* silently fail */ }
+    }catch(e){ setStatus('Failed to load collection codes: ' + e.message) }
   }
 
   async function createRolePolicy(){
