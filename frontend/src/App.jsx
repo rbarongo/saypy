@@ -781,21 +781,14 @@ export default function App(){
       }
       // attach helper metadata per row (verified flag and suggestions)
       const enriched = (Array.isArray(data)? data : []).map(r=> ({...r, __verified: false, __suggestions: []}))
-      const scoped = enriched.filter(r=>{
-        if(currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId))) return true
-        if(Number(r?.church) === Number(currentUserChurchId)) return true
-        const currentChurchName = String((churches || []).find(c=> Number(c.id)===Number(currentUserChurchId))?.name || '').trim().toLowerCase()
-        const rowChurchText = String(r?.church ?? '').trim().toLowerCase()
-        return !!currentChurchName && rowChurchText === currentChurchName
-      })
-      setMembersCollections(scoped)
-      if(!scoped.length){
+      setMembersCollections(enriched)
+      if(!enriched.length){
         setStatus('No collection rows found')
       }else{
         setStatus('')
       }
-      if(scoped && scoped.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
-        const keys = Object.keys(scoped[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
+      if(enriched && enriched.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
+        const keys = Object.keys(enriched[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
         if(!keys.includes('verified')) keys.push('verified')
         setMembersCollectionsFields(keys)
         if(!mcVisibleCols.length) setMcVisibleCols(keys)
@@ -829,6 +822,20 @@ export default function App(){
       if(rowChurchText.includes(currentChurchName)) return true
     }
     return false
+  }
+
+  function hasActiveMcFilters(){
+    return [
+      mcApplied.text,
+      mcApplied.code,
+      mcApplied.memberId,
+      mcApplied.memberName,
+      mcApplied.s1,
+      mcApplied.amountMin,
+      mcApplied.amountMax,
+      mcApplied.from,
+      mcApplied.to,
+    ].some(v => String(v ?? '').trim() !== '')
   }
 
   function getFilteredMembersCollectionsRows(){
@@ -877,7 +884,14 @@ export default function App(){
       const n = Number(mcApplied.amountMax)
       if(!Number.isNaN(n)) rows = rows.filter(r => Number(r?.s5 ?? 0) <= n)
     }
+    const activeFilters = hasActiveMcFilters()
     rows = rows.slice().sort((a,b)=>{
+      if(!activeFilters){
+        const ad = a?.added_at ? new Date(a.added_at).getTime() : NaN
+        const bd = b?.added_at ? new Date(b.added_at).getTime() : NaN
+        if(!Number.isNaN(ad) && !Number.isNaN(bd) && ad !== bd) return bd - ad
+        return Number(b?.id ?? 0) - Number(a?.id ?? 0)
+      }
       const va = a && a[mcSortKey]
       const vb = b && b[mcSortKey]
       if(va==null && vb==null) return 0
@@ -886,7 +900,7 @@ export default function App(){
       if(typeof va === 'number' && typeof vb === 'number') return mcSortDir==='asc' ? va-vb : vb-va
       return mcSortDir==='asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
     })
-    return rows
+    return activeFilters ? rows : rows.slice(0, 10)
   }
 
   function escapeHtml(value){
@@ -1805,7 +1819,7 @@ export default function App(){
           <div>
             <h3>Members Collections</h3>
             <div style={{marginBottom:8,fontSize:13,color:'#475569',fontWeight:600}}>
-              Showing latest records for your church only (Church ID: {currentUserChurchId || '-'})
+              Showing latest 10 records for your church by default (Church ID: {currentUserChurchId || '-'}). Apply filters to view more matching records.
             </div>
             <div style={{marginBottom:8, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
               <button onClick={fetchMembersCollections}>Refresh</button>
