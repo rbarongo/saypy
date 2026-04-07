@@ -2461,6 +2461,40 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
     }
   }, [scopedChurchId])
 
+  function savedCollectionDateKey(){
+    const userKey = String(user?.id || user?.username || '').trim()
+    return userKey ? `saypy.collection.selectedDate.${userKey}` : ''
+  }
+
+  useEffect(()=>{
+    const storageKey = savedCollectionDateKey()
+    if(!storageKey) return
+    try{
+      const savedValue = localStorage.getItem(storageKey)
+      if(savedValue){
+        setSelectedDate(savedValue)
+      }
+    }catch(e){}
+  }, [user?.id, user?.username])
+
+  function saveSelectedCollectionDate(){
+    const storageKey = savedCollectionDateKey()
+    if(!storageKey){
+      showPrompt('warning', 'Unable to save date selection because no user context was found.')
+      return
+    }
+    if(!selectedDate){
+      showPrompt('warning', 'Choose a date before saving the selection.')
+      return
+    }
+    try{
+      localStorage.setItem(storageKey, selectedDate)
+      showPrompt('success', `Saved date selection for ${String(user?.username || user?.id || 'current user')}: ${formatPreviewDate(selectedDate)}`)
+    }catch(e){
+      showPrompt('error', 'Failed to save date selection: ' + (e?.message || String(e)))
+    }
+  }
+
   function canAccessChurch(churchId){
     if(churchId === null || churchId === undefined || churchId === '') return true
     if(scopedChurchId === null || scopedChurchId === undefined || Number.isNaN(Number(scopedChurchId))) return true
@@ -2692,6 +2726,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
           <div style={{marginTop:8}}>
             <label>Date:</label>
             <input type='date' value={selectedDate} onChange={e=>{ setSelectedDate(e.target.value) }} />
+            <button type='button' onClick={saveSelectedCollectionDate} style={{marginLeft:8}}>Save Selection</button>
             <label style={{marginLeft:8}}>Church:</label>
             <select value={selectedChurch||''} onChange={e=>{
               const nextChurch = e.target.value
@@ -2714,6 +2749,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
           <div>
             <label>Date:</label>
             <input type='date' value={selectedDate} onChange={e=>{ setSelectedDate(e.target.value); recomputeMappedPreview() }} />
+            <button type='button' onClick={saveSelectedCollectionDate} style={{marginLeft:8}}>Save Selection</button>
             <label style={{marginLeft:8}}>Church:</label>
             <select value={selectedChurch||''} onChange={e=>{
               const nextChurch = e.target.value
