@@ -610,6 +610,7 @@ export default function App(){
   const [mcFilterCode, setMcFilterCode] = useState('')
   const [mcFrom, setMcFrom] = useState('')
   const [mcTo, setMcTo] = useState('')
+  const [mcApplied, setMcApplied] = useState({ searchField: 'all', text: '', code: '', from: '', to: '' })
   const [mcSortKey, setMcSortKey] = useState('id')
   const [mcSortDir, setMcSortDir] = useState('desc')
   const [mcPage, setMcPage] = useState(1)
@@ -759,14 +760,17 @@ export default function App(){
       }
       // attach helper metadata per row (verified flag and suggestions)
       const enriched = (Array.isArray(data)? data : []).map(r=> ({...r, __verified: false, __suggestions: []}))
-      setMembersCollections(enriched)
-      if(!enriched.length){
+      const scoped = (currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId)))
+        ? enriched
+        : enriched.filter(r => Number(r?.church) === Number(currentUserChurchId))
+      setMembersCollections(scoped)
+      if(!scoped.length){
         setStatus('No collection rows found')
       }else{
         setStatus('')
       }
-      if(enriched && enriched.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
-        const keys = Object.keys(enriched[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
+      if(scoped && scoped.length && (!membersCollectionsFields || membersCollectionsFields.length===0)){
+        const keys = Object.keys(scoped[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
         if(!keys.includes('verified')) keys.push('verified')
         setMembersCollectionsFields(keys)
       }
@@ -1629,10 +1633,13 @@ export default function App(){
         {page==='members_collections' && (
           <div>
             <h3>Members Collections</h3>
+            <div style={{marginBottom:8,fontSize:13,color:'#475569',fontWeight:600}}>
+              Showing records for your church only (Church ID: {currentUserChurchId || '-'})
+            </div>
             <div style={{marginBottom:8, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
               <button onClick={fetchMembersCollections}>Refresh</button>
               <label>Search in</label>
-              <select value={mcSearchField} onChange={e=>{ setMcSearchField(e.target.value); setMcPage(1) }}>
+              <select value={mcSearchField} onChange={e=>setMcSearchField(e.target.value)}>
                 <option value='all'>All fields</option>
                 <option value='collection_code'>Collection Code</option>
                 <option value='s4'>Member Name</option>
@@ -1640,16 +1647,26 @@ export default function App(){
                 <option value='s1'>S1</option>
                 <option value='church'>Church</option>
               </select>
-              <input placeholder='Search' value={mcFilterText} onChange={e=>{ setMcFilterText(e.target.value); setMcPage(1) }} />
-              <select value={mcFilterCode} onChange={e=>{ setMcFilterCode(e.target.value); setMcPage(1) }}>
+              <input placeholder='Search' value={mcFilterText} onChange={e=>setMcFilterText(e.target.value)} />
+              <select value={mcFilterCode} onChange={e=>setMcFilterCode(e.target.value)}>
                 <option value=''>-- all codes --</option>
                 {(collectionCodes||[]).map(c=> <option key={c.column_name} value={c.column_name}>{c.code || c.column_name}</option>)}
               </select>
               <button onClick={()=> verifyNames()}>Verify Names</button>
               <label>From</label>
-              <input type='date' value={mcFrom} onChange={e=>{ setMcFrom(e.target.value); setMcPage(1) }} />
+              <input type='date' value={mcFrom} onChange={e=>setMcFrom(e.target.value)} />
               <label>To</label>
-              <input type='date' value={mcTo} onChange={e=>{ setMcTo(e.target.value); setMcPage(1) }} />
+              <input type='date' value={mcTo} onChange={e=>setMcTo(e.target.value)} />
+              <button onClick={()=>{
+                setMcApplied({
+                  searchField: mcSearchField,
+                  text: mcFilterText,
+                  code: mcFilterCode,
+                  from: mcFrom,
+                  to: mcTo,
+                })
+                setMcPage(1)
+              }}>Submit</button>
               <label>Max rows</label>
               <select value={mcPageSize} onChange={e=>{ setMcPageSize(Number(e.target.value)); setMcPage(1) }}>
                 {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
@@ -1673,19 +1690,22 @@ export default function App(){
                     try{
                       // apply client-side filters/sort/paging
                       let rows = Array.isArray(membersCollections) ? membersCollections : [];
-                      if(mcFilterCode) rows = rows.filter(r=> {
-                        try{ return r.collection_code === mcFilterCode || r.collection_code === (collectionCodes.find(c=>c.column_name===mcFilterCode)?.code) }
+                      rows = (currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId)))
+                        ? rows
+                        : rows.filter(r => Number(r?.church) === Number(currentUserChurchId))
+                      if(mcApplied.code) rows = rows.filter(r=> {
+                        try{ return r.collection_code === mcApplied.code || r.collection_code === (collectionCodes.find(c=>c.column_name===mcApplied.code)?.code) }
                         catch(e){ return false }
                       })
-                      if(mcFilterText) rows = rows.filter(r => {
+                      if(mcApplied.text) rows = rows.filter(r => {
                         try{
-                          const q = mcFilterText.toLowerCase()
-                          if(mcSearchField === 'all') return Object.values(r).join(' ').toLowerCase().includes(q)
-                          return String(r?.[mcSearchField] ?? '').toLowerCase().includes(q)
+                          const q = mcApplied.text.toLowerCase()
+                          if(mcApplied.searchField === 'all') return Object.values(r).join(' ').toLowerCase().includes(q)
+                          return String(r?.[mcApplied.searchField] ?? '').toLowerCase().includes(q)
                         }catch(e){ return false }
                       })
-                      if(mcFrom){ const dfrom = new Date(mcFrom); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) >= dfrom }catch(e){return false} }) }
-                      if(mcTo){ const dto = new Date(mcTo); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) <= dto }catch(e){return false} }) }
+                      if(mcApplied.from){ const dfrom = new Date(mcApplied.from); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) >= dfrom }catch(e){return false} }) }
+                      if(mcApplied.to){ const dto = new Date(mcApplied.to); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) <= dto }catch(e){return false} }) }
                       // sort
                       rows = rows.slice().sort((a,b)=>{
                         const va = a && a[mcSortKey]; const vb = b && b[mcSortKey];
