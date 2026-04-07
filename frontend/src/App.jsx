@@ -647,7 +647,7 @@ export default function App(){
       setMcPage(1)
       setMcPageSize(10)
       setStatus('Loading collections...')
-      fetchMembersCollections().then(()=>{
+      fetchMembersCollections({ limit: 10 }).then(()=>{
         // Keep error/status set by fetchMembersCollections when request fails.
       }).catch(()=>{})
     }
@@ -765,9 +765,25 @@ export default function App(){
     }catch(e){}
   }
 
-  async function fetchMembersCollections(){
+  async function fetchMembersCollections(criteria = null){
     try{
-      const res = await authFetch('http://localhost:8000/reports/members_collections')
+      const active = criteria || {}
+      const params = new URLSearchParams()
+      if(active.limit != null) params.set('limit', String(active.limit))
+      if(active.search) params.set('search', String(active.search))
+      if(active.searchField) params.set('search_field', String(active.searchField))
+      if(active.collectionCode) params.set('collection_code', String(active.collectionCode))
+      if(active.memberId) params.set('member_id', String(active.memberId))
+      if(active.memberName) params.set('member_name', String(active.memberName))
+      if(active.s1) params.set('s1', String(active.s1))
+      if(active.from) params.set('start_date', String(active.from))
+      if(active.to) params.set('end_date', String(active.to))
+      if(active.amountMin !== '' && active.amountMin != null) params.set('amount_min', String(active.amountMin))
+      if(active.amountMax !== '' && active.amountMax != null) params.set('amount_max', String(active.amountMax))
+      const url = params.toString()
+        ? `http://localhost:8000/reports/members_collections?${params.toString()}`
+        : 'http://localhost:8000/reports/members_collections'
+      const res = await authFetch(url)
       const data = await res.json()
       if(!res.ok){
         const msg = String(data?.detail || JSON.stringify(data) || 'Request failed')
@@ -841,49 +857,6 @@ export default function App(){
   function getFilteredMembersCollectionsRows(){
     let rows = Array.isArray(membersCollections) ? membersCollections : []
     rows = rows.filter(r => rowMatchesCurrentChurch(r))
-    if(mcApplied.code){
-      rows = rows.filter(r=> {
-        try{ return r.collection_code === mcApplied.code || r.collection_code === (collectionCodes.find(c=>c.column_name===mcApplied.code)?.code) }
-        catch(e){ return false }
-      })
-    }
-    if(mcApplied.memberId){
-      const q = String(mcApplied.memberId).toLowerCase()
-      rows = rows.filter(r => String(r?.member_id ?? '').toLowerCase().includes(q))
-    }
-    if(mcApplied.memberName){
-      const q = String(mcApplied.memberName).toLowerCase()
-      rows = rows.filter(r => String(r?.s4 ?? '').toLowerCase().includes(q))
-    }
-    if(mcApplied.s1){
-      const q = String(mcApplied.s1).toLowerCase()
-      rows = rows.filter(r => String(r?.s1 ?? '').toLowerCase().includes(q))
-    }
-    if(mcApplied.text){
-      rows = rows.filter(r => {
-        try{
-          const q = mcApplied.text.toLowerCase()
-          if(mcApplied.searchField === 'all') return Object.values(r).join(' ').toLowerCase().includes(q)
-          return String(r?.[mcApplied.searchField] ?? '').toLowerCase().includes(q)
-        }catch(e){ return false }
-      })
-    }
-    if(mcApplied.from){
-      const dfrom = new Date(mcApplied.from)
-      rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) >= dfrom }catch(e){ return false } })
-    }
-    if(mcApplied.to){
-      const dto = new Date(mcApplied.to)
-      rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) <= dto }catch(e){ return false } })
-    }
-    if(mcApplied.amountMin !== '' && mcApplied.amountMin !== null){
-      const n = Number(mcApplied.amountMin)
-      if(!Number.isNaN(n)) rows = rows.filter(r => Number(r?.s5 ?? 0) >= n)
-    }
-    if(mcApplied.amountMax !== '' && mcApplied.amountMax !== null){
-      const n = Number(mcApplied.amountMax)
-      if(!Number.isNaN(n)) rows = rows.filter(r => Number(r?.s5 ?? 0) <= n)
-    }
     const activeFilters = hasActiveMcFilters()
     rows = rows.slice().sort((a,b)=>{
       if(!activeFilters){
@@ -1822,7 +1795,18 @@ export default function App(){
               Showing latest 10 records for your church by default (Church ID: {currentUserChurchId || '-'}). Apply filters to view more matching records.
             </div>
             <div style={{marginBottom:8, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
-              <button onClick={fetchMembersCollections}>Refresh</button>
+              <button onClick={()=> fetchMembersCollections(hasActiveMcFilters() ? {
+                search: mcApplied.text,
+                searchField: mcApplied.searchField,
+                collectionCode: mcApplied.code,
+                memberId: mcApplied.memberId,
+                memberName: mcApplied.memberName,
+                s1: mcApplied.s1,
+                from: mcApplied.from,
+                to: mcApplied.to,
+                amountMin: mcApplied.amountMin,
+                amountMax: mcApplied.amountMax,
+              } : { limit: 10 })}>Refresh</button>
               <label>Search in</label>
               <select value={mcSearchField} onChange={e=>setMcSearchField(e.target.value)}>
                 <option value='all'>All fields</option>
@@ -1850,7 +1834,7 @@ export default function App(){
               <label>Amount max</label>
               <input type='number' step='0.01' value={mcFilterAmountMax} onChange={e=>setMcFilterAmountMax(e.target.value)} style={{width:110}} />
               <button onClick={()=>{
-                setMcApplied({
+                const next = {
                   searchField: mcSearchField,
                   text: mcFilterText,
                   code: mcFilterCode,
@@ -1861,8 +1845,21 @@ export default function App(){
                   amountMax: mcFilterAmountMax,
                   from: mcFrom,
                   to: mcTo,
-                })
+                }
+                setMcApplied(next)
                 setMcPage(1)
+                fetchMembersCollections({
+                  search: next.text,
+                  searchField: next.searchField,
+                  collectionCode: next.code,
+                  memberId: next.memberId,
+                  memberName: next.memberName,
+                  s1: next.s1,
+                  from: next.from,
+                  to: next.to,
+                  amountMin: next.amountMin,
+                  amountMax: next.amountMax,
+                })
               }}>Submit</button>
               <button onClick={()=>{
                 setMcFilterText('')
@@ -1876,6 +1873,7 @@ export default function App(){
                 setMcTo('')
                 setMcApplied({ searchField: 'all', text: '', code: '', memberId: '', memberName: '', s1: '', amountMin: '', amountMax: '', from: '', to: '' })
                 setMcPage(1)
+                fetchMembersCollections({ limit: 10 })
               }}>Clear</button>
               <label>Max rows</label>
               <select value={mcPageSize} onChange={e=>{ setMcPageSize(Number(e.target.value)); setMcPage(1) }}>

@@ -1588,8 +1588,21 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
 
 
 @app.get('/reports/members_collections')
-def report_members_collections(start_date: Optional[str] = None, end_date: Optional[str] = None, auth: dict = Depends(require_api_key_or_user)):
-    """Return members_collection rows, optionally filtered by s2 (date) range. Dates in ISO format."""
+def report_members_collections(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    search: Optional[str] = None,
+    search_field: Optional[str] = 'all',
+    collection_code: Optional[str] = None,
+    member_id: Optional[str] = None,
+    member_name: Optional[str] = None,
+    s1: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
+    limit: Optional[int] = None,
+    auth: dict = Depends(require_api_key_or_user),
+):
+    """Return church-scoped uploaded members_collection rows with flexible optional filters."""
     try:
         _require_auth_any_right(auth, {'can_manage_members_collections', 'can_view_reports'}, context='members collections access')
         # Read full table into pandas then filter by s2 in Python to avoid SQL param dialect issues
@@ -1606,6 +1619,57 @@ def report_members_collections(start_date: Optional[str] = None, end_date: Optio
                 df = df[church_series == actor_church_num]
             else:
                 df = df[df['church'].astype(str) == str(actor_church)]
+        # Flexible filters for members collections page.
+        search = str(search or '').strip()
+        search_field = str(search_field or 'all').strip()
+        collection_code = str(collection_code or '').strip()
+        member_id = str(member_id or '').strip()
+        member_name = str(member_name or '').strip()
+        s1 = str(s1 or '').strip()
+        has_active_filters = any([
+            start_date,
+            end_date,
+            search,
+            collection_code,
+            member_id,
+            member_name,
+            s1,
+            amount_min is not None,
+            amount_max is not None,
+        ])
+
+        if collection_code and 'collection_code' in df.columns:
+            df = df[df['collection_code'].astype(str).str.strip().str.lower() == collection_code.lower()]
+
+        if member_id and 'member_id' in df.columns:
+            df = df[df['member_id'].astype(str).str.lower().str.contains(member_id.lower(), na=False)]
+
+        if member_name and 's4' in df.columns:
+            df = df[df['s4'].astype(str).str.lower().str.contains(member_name.lower(), na=False)]
+
+        if s1 and 's1' in df.columns:
+            df = df[df['s1'].astype(str).str.lower().str.contains(s1.lower(), na=False)]
+
+        if amount_min is not None and 's5' in df.columns:
+            amt = pd.to_numeric(df['s5'], errors='coerce')
+            df = df[amt >= float(amount_min)]
+
+        if amount_max is not None and 's5' in df.columns:
+            amt = pd.to_numeric(df['s5'], errors='coerce')
+            df = df[amt <= float(amount_max)]
+
+        if search:
+            q = search.lower()
+            if search_field and search_field != 'all' and search_field in df.columns:
+                df = df[df[search_field].astype(str).str.lower().str.contains(q, na=False)]
+            else:
+                mask = pd.Series([False] * len(df), index=df.index)
+                for col in df.columns:
+                    try:
+                        mask = mask | df[col].astype(str).str.lower().str.contains(q, na=False)
+                    except Exception:
+                        continue
+                df = df[mask]
         # Parse provided dates defensively. Accept either full ISO datetimes or simple YYYY-MM-DD.
         try:
             start_dt = pd.to_datetime(start_date, errors='coerce') if start_date else None
@@ -1625,6 +1689,23 @@ def report_members_collections(start_date: Optional[str] = None, end_date: Optio
         except Exception as e:
             # Return a helpful error for invalid date input rather than failing silently
             raise HTTPException(status_code=400, detail=f"Invalid date filter: {e}")
+
+        # Default view: latest 10 uploaded rows for this church.
+        if 'added_at' in df.columns:
+            df['added_at'] = pd.to_datetime(df['added_at'], errors='coerce')
+            df = df.sort_values(by=['added_at', 'id'], ascending=[False, False], na_position='last')
+        elif 'id' in df.columns:
+            df = df.sort_values(by='id', ascending=False)
+
+        effective_limit = limit
+        if effective_limit is None and not has_active_filters:
+            effective_limit = 10
+        if effective_limit is not None:
+            try:
+                lim = max(1, int(effective_limit))
+                df = df.head(lim)
+            except Exception:
+                pass
         rows = df.to_dict(orient='records')
         out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
         return out
