@@ -576,9 +576,9 @@ def _xlsx_read_collection_codes_rows(xlsx_path: str) -> List[dict]:
     """Read Collection_Codes.xlsx rows as dicts using stdlib XML parsing.
 
     Expected headers in first row: COLUMN_NAME, CODE, ID, CHURCH.
-    Business mapping (as requested):
-    - COLUMN_NAME -> collection name (db column_name)
-    - CODE -> code (db code)
+    Business mapping used by the app:
+    - CODE -> db column_name (field key such as s1/c1/l31)
+    - COLUMN_NAME -> db code (display label)
     """
     if not os.path.exists(xlsx_path):
         return []
@@ -648,10 +648,10 @@ def _xlsx_read_collection_codes_rows(xlsx_path: str) -> List[dict]:
             for col, hv in header_map.items():
                 row_dict[hv] = cells.get(col, '').strip()
 
-            collection_name = str(row_dict.get('COLUMN_NAME') or '').strip()
-            code_value = str(row_dict.get('CODE') or '').strip()
+            code_key = str(row_dict.get('CODE') or '').strip()
+            label_value = str(row_dict.get('COLLECTION_NAME') or row_dict.get('COLUMN_NAME') or '').strip()
             church_raw = str(row_dict.get('CHURCH') or '').strip()
-            if not collection_name or not code_value:
+            if not code_key or not label_value:
                 continue
             church_id = None
             if church_raw:
@@ -660,8 +660,8 @@ def _xlsx_read_collection_codes_rows(xlsx_path: str) -> List[dict]:
                 except Exception:
                     church_id = None
             rows_out.append({
-                'column_name': collection_name,
-                'code': code_value,
+                'column_name': code_key,
+                'code': label_value,
                 'church': church_id,
                 'custom_collection_name': None,
             })
