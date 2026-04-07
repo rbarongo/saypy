@@ -56,6 +56,44 @@ ROLE_UPLOADER = 'uploader'
 ROLE_VIEWER = 'viewer'
 ALL_ROLES = {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER}
 
+MEMBER_STATUS_ACTIVE = 'active'
+MEMBER_STATUS_INACTIVE_TRANSFER = 'inactive by transfer'
+MEMBER_STATUS_INACTIVE_REMOVAL = 'inactive by removal'
+MEMBER_STATUS_INACTIVE_DEATH = 'inactive by death'
+MEMBER_STATUS_INACTIVE_UNKNOWN = 'inactive unknown reason'
+MEMBER_STATUSES = {
+    MEMBER_STATUS_ACTIVE,
+    MEMBER_STATUS_INACTIVE_TRANSFER,
+    MEMBER_STATUS_INACTIVE_REMOVAL,
+    MEMBER_STATUS_INACTIVE_DEATH,
+    MEMBER_STATUS_INACTIVE_UNKNOWN,
+}
+
+
+def _normalize_member_status(value: Optional[str]) -> Optional[str]:
+    raw = str(value or '').strip().lower()
+    if raw == '':
+        return None
+    aliases = {
+        'active': MEMBER_STATUS_ACTIVE,
+        'inactive by transfer': MEMBER_STATUS_INACTIVE_TRANSFER,
+        'inactive transfer': MEMBER_STATUS_INACTIVE_TRANSFER,
+        'transferred': MEMBER_STATUS_INACTIVE_TRANSFER,
+        'inactive by removal': MEMBER_STATUS_INACTIVE_REMOVAL,
+        'removed': MEMBER_STATUS_INACTIVE_REMOVAL,
+        'inactive by death': MEMBER_STATUS_INACTIVE_DEATH,
+        'dead': MEMBER_STATUS_INACTIVE_DEATH,
+        'deceased': MEMBER_STATUS_INACTIVE_DEATH,
+        'inactive unknown reason': MEMBER_STATUS_INACTIVE_UNKNOWN,
+        'inactive unknown': MEMBER_STATUS_INACTIVE_UNKNOWN,
+        'unknown': MEMBER_STATUS_INACTIVE_UNKNOWN,
+    }
+    normalized = aliases.get(raw, raw)
+    if normalized not in MEMBER_STATUSES:
+        allowed = ', '.join(sorted(MEMBER_STATUSES))
+        raise HTTPException(status_code=422, detail=f'Invalid member status. Allowed values: {allowed}')
+    return normalized
+
 
 def _normalize_user_context(user: Optional[dict]) -> Optional[dict]:
     if not isinstance(user, dict):
@@ -480,6 +518,8 @@ class MemberIn(BaseModel):
     GROUP_LEADER_ID: Optional[int] = None
     DEFAULT_GROUP_LEADER_ID: Optional[int] = None
     STATUS: Optional[str] = None
+    TRANSFER_TO_CHURCH: Optional[int] = None
+    TRANSFER_DATE: Optional[datetime] = None
     PHONE: Optional[str] = None
     PHONE2: Optional[str] = None
     EMAIL: Optional[str] = None
@@ -498,6 +538,7 @@ def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_use
     _require_auth_right(auth, 'can_manage_members', context='member creation')
     actor_church = _auth_context_church(auth)
     effective_church = _enforce_church_scope(payload.church, actor_church, context='member creation')
+    normalized_status = _normalize_member_status(payload.STATUS)
     pk = insert_member(
         sno=payload.sno,
         MEMBER_NAME=payload.MEMBER_NAME,
@@ -511,7 +552,10 @@ def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_use
         DEFAULT_GROUP_ALIAS=payload.DEFAULT_GROUP_ALIAS,
         GROUP_LEADER_ID=payload.GROUP_LEADER_ID,
         DEFAULT_GROUP_LEADER_ID=payload.DEFAULT_GROUP_LEADER_ID,
-        STATUS=payload.STATUS,
+        STATUS=normalized_status,
+        TRANSFER_TO_CHURCH=payload.TRANSFER_TO_CHURCH,
+        TRANSFER_DATE=payload.TRANSFER_DATE,
+        STATUS_UPDATED_AT=datetime.utcnow() if normalized_status else None,
         PHONE=payload.PHONE,
         PHONE2=payload.PHONE2,
         EMAIL=payload.EMAIL,
@@ -1526,6 +1570,7 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
                 raise HTTPException(status_code=404, detail='member not found')
             _enforce_church_scope(existing[0], actor_church, context='this member record')
         effective_church = _enforce_church_scope(payload.church, actor_church, context='member update')
+        normalized_status = _normalize_member_status(payload.STATUS)
 
         with engine.connect() as conn:
             conn.execute(
@@ -1545,6 +1590,9 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
                         GROUP_LEADER_ID=:gleader,
                         DEFAULT_GROUP_LEADER_ID=:dgleader,
                         STATUS=:status,
+                        TRANSFER_TO_CHURCH=:transfer_to_church,
+                        TRANSFER_DATE=:transfer_date,
+                        STATUS_UPDATED_AT=:status_updated_at,
                         PHONE=:phone,
                         PHONE2=:phone2,
                         EMAIL=:email,
@@ -1567,7 +1615,10 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
                     "dgalias": payload.DEFAULT_GROUP_ALIAS,
                     "gleader": payload.GROUP_LEADER_ID,
                     "dgleader": payload.DEFAULT_GROUP_LEADER_ID,
-                    "status": payload.STATUS,
+                    "status": normalized_status,
+                    "transfer_to_church": payload.TRANSFER_TO_CHURCH,
+                    "transfer_date": payload.TRANSFER_DATE,
+                    "status_updated_at": datetime.utcnow() if normalized_status else None,
                     "phone": payload.PHONE,
                     "phone2": payload.PHONE2,
                     "email": payload.EMAIL,

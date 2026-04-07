@@ -1032,6 +1032,10 @@ export default function App(){
       MEMBER_ID: 'Member ID',
       PHONE: 'Phone',
       church: 'Church',
+      STATUS: 'Member Status',
+      TRANSFER_TO_CHURCH: 'Transfer To Church',
+      TRANSFER_DATE: 'Transfer Date',
+      STATUS_UPDATED_AT: 'Status Updated',
     }
     return map[col] || col
   }
@@ -2073,6 +2077,18 @@ export default function App(){
                   {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
                     if(key==='id' || key==='created_at') return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
+                    if(key==='STATUS'){
+                      return (
+                        <select key={key} value={val||''} onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value || null}))}>
+                          <option value=''>-- status --</option>
+                          <option value='active'>active</option>
+                          <option value='inactive by transfer'>inactive by transfer</option>
+                          <option value='inactive by removal'>inactive by removal</option>
+                          <option value='inactive by death'>inactive by death</option>
+                          <option value='inactive unknown reason'>inactive unknown reason</option>
+                        </select>
+                      )
+                    }
                     if(key==='church'){
                       return (
                         <select key={key} value={val||''} onChange={e=>{
@@ -2084,6 +2100,22 @@ export default function App(){
                           {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
                         </select>
                       )
+                    }
+                    if(key==='TRANSFER_TO_CHURCH'){
+                      return (
+                        <select key={key} value={val||''} onChange={e=>{
+                          const selected = e.target.value
+                          if(!canAccessChurch(selected)){ denyRestrictedChurchAccess('member transfer'); return }
+                          setMemberForm(prev=>({...prev,[key]: selected === '' ? null : Number(selected)}))
+                        }}>
+                          <option value=''>-- transfer to church --</option>
+                          {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
+                        </select>
+                      )
+                    }
+                    if(key==='TRANSFER_DATE'){
+                      const v = val? new Date(val).toISOString().slice(0,10) : ''
+                      return <input key={key} type='date' value={v} onChange={e=> setMemberForm(prev=>({...prev, [key]: e.target.value || null}))} />
                     }
                     const isNumber = typeof val === 'number' || key.toLowerCase().includes('id') || key.toLowerCase().includes('sno') || key.toLowerCase().includes('pledge')
                     return (

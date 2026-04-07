@@ -364,6 +364,9 @@ members = Table(
     Column('GROUP_LEADER_ID', Integer, nullable=True),
     Column('DEFAULT_GROUP_LEADER_ID', Integer, nullable=True),
     Column('STATUS', String(100), nullable=True),
+    Column('TRANSFER_TO_CHURCH', Integer, nullable=True),
+    Column('TRANSFER_DATE', DateTime, nullable=True),
+    Column('STATUS_UPDATED_AT', DateTime, nullable=True),
     Column('PHONE', String(100), nullable=True),
     Column('PHONE2', String(100), nullable=True),
     Column('EMAIL', String(320), nullable=True),
@@ -579,6 +582,10 @@ def create_tables():
         pass
     try:
         ensure_collection_codes_schema()
+    except Exception:
+        pass
+    try:
+        ensure_members_schema()
     except Exception:
         pass
     # Ensure any new columns are present on existing tables (simple ALTER TABLE add column migration)
@@ -1509,6 +1516,32 @@ def ensure_members_collection_schema():
                 pass
 
 
+def ensure_members_schema():
+    """Ensure the `members` table has expected status/transfer columns."""
+    inspector = inspect(engine)
+    if 'members' not in inspector.get_table_names():
+        return
+    existing = {c['name'] for c in inspector.get_columns('members')}
+    expected = {
+        'STATUS': 'TEXT',
+        'TRANSFER_TO_CHURCH': 'INTEGER',
+        'TRANSFER_DATE': 'DATETIME',
+        'STATUS_UPDATED_AT': 'DATETIME',
+    }
+    missing = [k for k in expected.keys() if k not in existing]
+
+    for col in missing:
+        col_type = expected[col]
+        sql_type = 'TEXT' if (DB_ENGINE in ("sqlite", "sqlite3") and col_type.startswith('VARCHAR')) else col_type
+        stmt = f'ALTER TABLE members ADD COLUMN {col} {sql_type}'
+        with engine.connect() as conn:
+            conn.execute(text(stmt))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+
 def insert_member(
     sno: Optional[int] = None,
     MEMBER_NAME: Optional[str] = None,
@@ -1523,6 +1556,9 @@ def insert_member(
     GROUP_LEADER_ID: Optional[int] = None,
     DEFAULT_GROUP_LEADER_ID: Optional[int] = None,
     STATUS: Optional[str] = None,
+    TRANSFER_TO_CHURCH: Optional[int] = None,
+    TRANSFER_DATE: Optional[datetime] = None,
+    STATUS_UPDATED_AT: Optional[datetime] = None,
     PHONE: Optional[str] = None,
     PHONE2: Optional[str] = None,
     EMAIL: Optional[str] = None,
@@ -1574,6 +1610,9 @@ def insert_member(
         GROUP_LEADER_ID=GROUP_LEADER_ID,
         DEFAULT_GROUP_LEADER_ID=DEFAULT_GROUP_LEADER_ID,
         STATUS=STATUS,
+        TRANSFER_TO_CHURCH=TRANSFER_TO_CHURCH,
+        TRANSFER_DATE=TRANSFER_DATE,
+        STATUS_UPDATED_AT=STATUS_UPDATED_AT,
         PHONE=PHONE,
         PHONE2=PHONE2,
         EMAIL=EMAIL,
