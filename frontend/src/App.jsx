@@ -651,7 +651,7 @@ export default function App(){
         // Keep error/status set by fetchMembersCollections when request fails.
       }).catch(()=>{})
     }
-  }, [page])
+  }, [page, currentUserChurchId, churches.length])
 
   // Global error handlers to avoid uncaught errors causing dev overlay crashes
   useEffect(()=>{
@@ -818,10 +818,17 @@ export default function App(){
 
   function rowMatchesCurrentChurch(row){
     if(currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId))) return true
-    if(Number(row?.church) === Number(currentUserChurchId)) return true
+    const rowChurchRaw = row?.church
+    const rowChurchText = String(rowChurchRaw ?? '').trim().toLowerCase()
+    if(Number(rowChurchRaw) === Number(currentUserChurchId)) return true
+    const idInText = String(rowChurchRaw ?? '').match(/\d+/)
+    if(idInText && Number(idInText[0]) === Number(currentUserChurchId)) return true
     const currentChurchName = String((churches || []).find(c=> Number(c.id)===Number(currentUserChurchId))?.name || '').trim().toLowerCase()
-    const rowChurchText = String(row?.church ?? '').trim().toLowerCase()
-    return !!currentChurchName && rowChurchText === currentChurchName
+    if(currentChurchName){
+      if(rowChurchText === currentChurchName) return true
+      if(rowChurchText.includes(currentChurchName)) return true
+    }
+    return false
   }
 
   function getFilteredMembersCollectionsRows(){
