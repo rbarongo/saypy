@@ -367,6 +367,19 @@ export default function App(){
     }
   }, [page, currentUserChurchId, rolesCatalog, user])
 
+  useEffect(()=>{
+    if(!user || status !== 'Logged in') return
+    const clearLoginStatus = ()=>{
+      setStatus(prev => prev === 'Logged in' ? '' : prev)
+    }
+    window.addEventListener('pointerdown', clearLoginStatus, { once: true })
+    window.addEventListener('keydown', clearLoginStatus, { once: true })
+    return ()=>{
+      window.removeEventListener('pointerdown', clearLoginStatus)
+      window.removeEventListener('keydown', clearLoginStatus)
+    }
+  }, [user, status])
+
   // ----- Admin: users -----
   const [usersList, setUsersList] = useState([])
   const [usersMaxRows, setUsersMaxRows] = useState(30)
