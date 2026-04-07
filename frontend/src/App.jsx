@@ -167,6 +167,7 @@ export default function App(){
   const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:'', custom_collection_name:''})
   const [showCollectionCodesPanel, setShowCollectionCodesPanel] = useState(false)
   const [collectionCodesMaxRows, setCollectionCodesMaxRows] = useState(30)
+  const [gridModeMain, setGridModeMain] = useState('classic')
   const [editingRole, setEditingRole] = useState(null)
   const [newRole, setNewRole] = useState({
     role: '',
@@ -956,6 +957,20 @@ export default function App(){
     }
   }
 
+  function mainGridWrapStyle(maxHeight = 420){
+    if(gridModeMain === 'scrollable'){
+      return { maxHeight, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:6 }
+    }
+    return { maxHeight, overflow:'auto' }
+  }
+
+  function mainGridTableStyle(fill = true){
+    if(gridModeMain === 'scrollable'){
+      return { width:'max-content', minWidth: fill ? '100%' : 'max-content', borderCollapse:'collapse' }
+    }
+    return { width: fill ? '100%' : 'auto', borderCollapse:'collapse' }
+  }
+
   const filteredUsers = (usersList || []).filter((u)=>{
     const q = String(usersSearchText || '').trim().toLowerCase()
     if(!q) return true
@@ -1055,6 +1070,17 @@ export default function App(){
               <div style={{fontSize:15,fontWeight:600,color:statusMeta().style.body,lineHeight:1.45}}>{statusMeta().body}</div>
             </div>
           )}
+          <div style={{marginBottom:12, display:'flex', gap:12, alignItems:'center', flexWrap:'wrap'}}>
+            <div style={{fontSize:13, fontWeight:700, color:'#334155'}}>All Grids Mode</div>
+            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+              <input type='radio' name='main-grid-mode' checked={gridModeMain==='scrollable'} onChange={()=>setGridModeMain('scrollable')} />
+              Scrollable
+            </label>
+            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+              <input type='radio' name='main-grid-mode' checked={gridModeMain==='classic'} onChange={()=>setGridModeMain('classic')} />
+              Classic
+            </label>
+          </div>
         {page==='dashboard' && (
           <div>
             <h3>Dashboard</h3>
@@ -1100,7 +1126,8 @@ export default function App(){
                 </select>
                 <span style={{color:'#666'}}>Showing {Math.min(filteredUsers.length, usersMaxRows)} of {filteredUsers.length}</span>
               </div>
-              <table border={1} cellPadding={6} style={{borderCollapse:'collapse'}}>
+              <div style={mainGridWrapStyle(420)}>
+              <table border={1} cellPadding={6} style={mainGridTableStyle(false)}>
                 <thead><tr><th>ID</th><th>Username</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Church</th><th>Actions</th></tr></thead>
                 <tbody>
                   {filteredUsers.slice(0, usersMaxRows).map(u=> {
@@ -1124,6 +1151,7 @@ export default function App(){
                   })}
                 </tbody>
               </table>
+              </div>
 
               {editingUser && (
                 <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
@@ -1213,8 +1241,8 @@ export default function App(){
                     </div>
                   </div>
 
-                  <div style={{overflow:'auto'}}>
-                    <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
+                  <div style={mainGridWrapStyle(460)}>
+                    <table border={1} cellPadding={6} style={mainGridTableStyle(true)}>
                       <thead>
                         <tr>
                           <th>Role</th>
@@ -1294,8 +1322,8 @@ export default function App(){
               <span style={{color:'#666'}}>Showing {Math.min(filteredMembers.length, membersMaxRows)} of {filteredMembers.length}</span>
             </div>
 
-            <div style={{maxHeight:400, overflow:'auto'}}>
-              <table style={{width:'100%', borderCollapse:'collapse'}}>
+            <div style={mainGridWrapStyle(400)}>
+              <table style={mainGridTableStyle(true)}>
                 <thead>
                   <tr>
                     {(showAllMemberCols? (membersFields || []) : ['sno','MEMBER_NAME','MEMBER_ID','PHONE','church']).map(h=> <th key={h}>{h}</th>)}
@@ -1430,7 +1458,8 @@ export default function App(){
                 {localChurchCollectionCodes.length === 0 ? (
                   <div style={{color:'#666'}}>No collection codes found for this church.</div>
                 ) : (
-                  <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
+                  <div style={mainGridWrapStyle(420)}>
+                  <table border={1} cellPadding={6} style={mainGridTableStyle(true)}>
                     <thead><tr><th>ID</th><th>Church ID</th><th>Code Key</th><th>Label</th><th>Custom Name</th><th>Scope</th>{canCollectionCodeEdit && <th>Actions</th>}</tr></thead>
                     <tbody>
                       {localChurchCollectionCodes.slice(0, collectionCodesMaxRows).map(code=> (
@@ -1463,6 +1492,7 @@ export default function App(){
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
               )}
@@ -1503,8 +1533,8 @@ export default function App(){
               </select>
             </div>
 
-            <div className='table-wrap' style={{maxHeight:500}}>
-              <table>
+            <div className='table-wrap' style={mainGridWrapStyle(500)}>
+              <table style={mainGridTableStyle(true)}>
                 <thead>
                   <tr>
                     {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> (
@@ -1682,8 +1712,8 @@ export default function App(){
                 </select>
                 <span style={{color:'#666'}}>Showing {Math.min(reportRows.length, reportMaxRows)} of {reportRows.length}</span>
               </div>
-              <div style={{maxHeight:400, overflow:'auto', marginTop:8}}>
-                <table style={{width:'100%', borderCollapse:'collapse'}}>
+              <div style={{...mainGridWrapStyle(400), marginTop:8}}>
+                <table style={mainGridTableStyle(true)}>
                   <thead>
                     <tr>
                       {reportRows[0] ? Object.keys(reportRows[0]).map(k=> <th key={k}>{labelForColumn(k)}</th>) : <th>No rows</th>}
@@ -1708,10 +1738,12 @@ export default function App(){
                 {aggRows && aggRows.length>0 && (
                   <div style={{marginTop:8}}>
                     <h4>Aggregated by Collection Code</h4>
-                    <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <div style={mainGridWrapStyle(320)}>
+                    <table style={mainGridTableStyle(true)}>
                       <thead><tr><th>Collection</th><th>Count</th><th>Total s5</th><th>Total s6</th><th>Total s7</th></tr></thead>
                       <tbody>{aggRows.map(a=> <tr key={a.collection_code}><td>{a.collection_code}</td><td>{a.count}</td><td>{a.s5}</td><td>{a.s6}</td><td>{a.s7}</td></tr>)}</tbody>
                     </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1726,8 +1758,8 @@ export default function App(){
                     </select>
                     <span style={{color:'#666'}}>Showing {Math.min((membersCollections||[]).length, reportCollectionsMaxRows)} of {(membersCollections||[]).length}</span>
                   </div>
-                  <div style={{maxHeight:300, overflow:'auto'}}>
-                    <table style={{width:'100%', borderCollapse:'collapse'}}>
+                  <div style={mainGridWrapStyle(300)}>
+                    <table style={mainGridTableStyle(true)}>
                       <thead>
                         <tr>{(membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
                       </thead>
@@ -1817,6 +1849,8 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   const [apiKey, setApiKey] = useState('')
   const [apiKeyStatus, setApiKeyStatus] = useState('')
   const [mappedPreview, setMappedPreview] = useState([])
+  const [mappedPreviewMode, setMappedPreviewMode] = useState('scrollable')
+  const [uploadGridMode, setUploadGridMode] = useState('classic')
   const [validationErrors, setValidationErrors] = useState([])
   const [promptState, setPromptState] = useState({ open: false, level: 'info', message: '' })
   const [copiedPrompt, setCopiedPrompt] = useState(false)
@@ -1874,6 +1908,20 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
 
   function currentChurchNameLocal(){
     return (churches || []).find(c=> Number(c.id)===Number(selectedChurch || scopedChurchId))?.name || String(selectedChurch || scopedChurchId || '-')
+  }
+
+  function uploadGridWrapStyle(maxHeight = 420){
+    if(uploadGridMode === 'scrollable'){
+      return { maxHeight, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:6 }
+    }
+    return { maxHeight, overflow:'auto', border:'1px solid #ddd' }
+  }
+
+  function uploadGridTableStyle(fill = true){
+    if(uploadGridMode === 'scrollable'){
+      return { width:'max-content', minWidth: fill ? '100%' : 'max-content', borderCollapse:'collapse' }
+    }
+    return { width: fill ? '100%' : 'auto', borderCollapse:'collapse' }
   }
 
   function formatPreviewDate(value){
@@ -2046,6 +2094,17 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         </div>
       )}
       <div style={{marginBottom:8,color:'#333'}}>Step {step} of {totalSteps}</div>
+      <div style={{marginBottom:10, display:'flex', gap:12, alignItems:'center', flexWrap:'wrap'}}>
+        <div style={{fontSize:13, fontWeight:700, color:'#334155'}}>Upload Grids Mode</div>
+        <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+          <input type='radio' name='upload-grid-mode' checked={uploadGridMode==='scrollable'} onChange={()=>setUploadGridMode('scrollable')} />
+          Scrollable
+        </label>
+        <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+          <input type='radio' name='upload-grid-mode' checked={uploadGridMode==='classic'} onChange={()=>setUploadGridMode('classic')} />
+          Classic
+        </label>
+      </div>
       {step===1 && (
         <div>
           <div>
@@ -2088,8 +2147,8 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
             <label style={{marginLeft:8}}>Uploader name:</label>
             <input value={uploaderName} readOnly disabled style={{opacity:1, color:'#111827', background:'#f3f4f6', fontWeight:600}} />
           </div>
-              <div style={{marginTop:8, maxHeight: 380, overflow: 'auto', border: '1px solid #ddd'}}>
-                <table border={1} cellPadding={6} style={{borderCollapse:'collapse', minWidth:'max-content'}}>
+              <div style={{marginTop:8, ...uploadGridWrapStyle(380)}}>
+                <table border={1} cellPadding={6} style={uploadGridTableStyle(false)}>
               <thead><tr><th>Header</th><th>Map to</th></tr></thead>
               <tbody>{headers.map(h=> (
                 <tr key={h}><td>{h}</td><td>
@@ -2120,6 +2179,17 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       {step===3 && (
         <div>
           <h4>Mapped preview ({mappedPreview.length} rows)</h4>
+          <div style={{marginBottom:10, display:'flex', gap:16, alignItems:'center', flexWrap:'wrap'}}>
+            <div style={{fontSize:13, fontWeight:700, color:'#334155'}}>Preview Mode</div>
+            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+              <input type='radio' name='mapped-preview-mode' checked={mappedPreviewMode==='scrollable'} onChange={()=>setMappedPreviewMode('scrollable')} />
+              Scrollable grid
+            </label>
+            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+              <input type='radio' name='mapped-preview-mode' checked={mappedPreviewMode==='classic'} onChange={()=>setMappedPreviewMode('classic')} />
+              Classic grid
+            </label>
+          </div>
           <div style={{marginBottom:10, display:'flex', gap:16, flexWrap:'wrap', alignItems:'stretch', padding:'12px 14px', border:'1px solid #d1d5db', borderRadius:8, background:'#f8fafc'}}>
             <div style={{display:'flex', flexDirection:'column', minWidth:180}}>
               <div style={{fontSize:12, fontWeight:800, letterSpacing:'0.05em', textTransform:'uppercase', color:'#475569'}}>Church</div>
@@ -2134,14 +2204,25 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
               <div style={{color:'#111827', fontWeight:700, fontSize:16, lineHeight:1.4}}>{uploaderName || '-'}</div>
             </div>
           </div>
-          <div style={{maxHeight:420, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:8}}>
-            <table style={{width:'100%', minWidth:'max-content', borderCollapse:'separate', borderSpacing:0}}>
-              <thead><tr>{mappedPreview[0] ? mappedPreviewColumnsLocal().map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd', whiteSpace:'nowrap'}}>{localLabelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
-              <tbody>{mappedPreview.map((r,idx)=> (
-                <tr key={idx}>{mappedPreviewColumnsLocal().map(k=> <td key={k}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} style={{minWidth:160}} /></td>)}</tr>
-              ))}</tbody>
-            </table>
-          </div>
+          {mappedPreviewMode==='scrollable' ? (
+            <div style={{maxHeight:420, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:8}}>
+              <table style={{width:'max-content', minWidth:'100%', borderCollapse:'separate', borderSpacing:0}}>
+                <thead><tr>{mappedPreview[0] ? mappedPreviewColumnsLocal().map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd', whiteSpace:'nowrap', minWidth:180}}>{localLabelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
+                <tbody>{mappedPreview.map((r,idx)=> (
+                  <tr key={idx}>{mappedPreviewColumnsLocal().map(k=> <td key={k} style={{whiteSpace:'nowrap'}}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} style={{minWidth:180, width:180}} /></td>)}</tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{maxHeight:420, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:8}}>
+              <table style={{width:'100%', minWidth:'max-content', borderCollapse:'separate', borderSpacing:0}}>
+                <thead><tr>{mappedPreview[0] ? mappedPreviewColumnsLocal().map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd', whiteSpace:'nowrap'}}>{localLabelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
+                <tbody>{mappedPreview.map((r,idx)=> (
+                  <tr key={idx}>{mappedPreviewColumnsLocal().map(k=> <td key={k}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} style={{minWidth:160}} /></td>)}</tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
           <div style={{marginTop:8}}>
             <button onClick={()=>setStep(2)}>Back</button>
             <button onClick={async ()=>{ await submitMapped() }} style={{marginLeft:8}}>Validate & Submit</button>
