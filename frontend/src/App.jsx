@@ -263,7 +263,14 @@ export default function App(){
       const res = await fetch('http://localhost:8000/collection_codes', { headers: authHeaders() })
       const data = await res.json().catch(()=>[])
       if(res.ok){
-        const localCodes = data.filter(c=> c.church == null || Number(c.church)===Number(currentUserChurchId))
+        const localCodes = data
+          .filter(c=> c.church == null || Number(c.church)===Number(currentUserChurchId))
+          .sort((a,b)=>{
+            const aLocal = Number(a.church)===Number(currentUserChurchId) ? 0 : 1
+            const bLocal = Number(b.church)===Number(currentUserChurchId) ? 0 : 1
+            if(aLocal !== bLocal) return aLocal - bLocal
+            return Number(a.id||0) - Number(b.id||0)
+          })
         setLocalCollectionCodes(localCodes)
       }
     }catch(e){ /* silently fail */ }
@@ -1361,15 +1368,18 @@ export default function App(){
                   <div style={{color:'#666'}}>No collection codes found for this church.</div>
                 ) : (
                   <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
-                    <thead><tr><th>Collection Name</th><th>Code</th>{hasRoleRight('can_manage_collections', true) && <th>Actions</th>}</tr></thead>
+                    <thead><tr><th>Collection Name</th><th>Code</th><th>Scope</th>{hasRoleRight('can_manage_collections', true) && <th>Actions</th>}</tr></thead>
                     <tbody>
                       {localCollectionCodes.slice(0, collectionCodesMaxRows).map(code=> (
                         <tr key={code.id}>
                           <td>{code.column_name}</td>
                           <td>{code.code}</td>
+                          <td>{Number(code.church)===Number(currentUserChurchId) ? 'Local' : 'Global'}</td>
                           {hasRoleRight('can_manage_collections', true) && (
                             <td>
-                              {editingCodeId !== code.id ? (
+                              {Number(code.church)!==Number(currentUserChurchId) ? (
+                                <span style={{color:'#666'}}>Read-only</span>
+                              ) : editingCodeId !== code.id ? (
                                 <>
                                   <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code}); }} style={{marginRight:8}}>Edit</button>
                                   <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>

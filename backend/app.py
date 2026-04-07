@@ -667,7 +667,7 @@ def list_collection_codes(current_user: dict = Depends(get_current_user)):
         if role == ROLE_SYSTEM_ADMIN:
             query = 'SELECT * FROM collection_codes ORDER BY CASE WHEN church IS NULL THEN 0 ELSE 1 END, church, id'
         else:
-            query = 'SELECT * FROM collection_codes WHERE church = :church_id OR church IS NULL ORDER BY CASE WHEN church IS NULL THEN 0 ELSE 1 END, id'
+            query = 'SELECT * FROM collection_codes WHERE church = :church_id OR church IS NULL ORDER BY CASE WHEN church = :church_id THEN 0 WHEN church IS NULL THEN 1 ELSE 2 END, id'
             params['church_id'] = church_id
         
         with engine.connect() as conn:
