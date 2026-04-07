@@ -1971,7 +1971,7 @@ export default function App(){
               <button onClick={openMcColumnPicker} style={{background:'none',border:'none',color:'#0a58ca',textDecoration:'underline',cursor:'pointer',padding:0,fontSize:13,fontWeight:700}}>
                 Column Picker ({getMcDisplayColumns().length} visible)
               </button>
-              <span style={{marginLeft:12,fontSize:12,color:'#666'}}>
+              <span style={{marginLeft:12,fontSize:12,color:'#334155',fontWeight:600}}>
                 Showing: {getMcDisplayColumns().map(labelForColumn).join(', ')}
               </span>
             </div>
@@ -1979,14 +1979,14 @@ export default function App(){
             {showMcColumnPicker && (
               <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
                 <div style={{background:'#fff',borderRadius:8,padding:24,maxWidth:800,width:'90%',maxHeight:'90vh',overflow:'auto',boxShadow:'0 10px 40px rgba(0,0,0,0.3)'}}>
-                  <h3 style={{marginTop:0,marginBottom:20,fontSize:18,fontWeight:700}}>Column Picker</h3>
+                  <h3 style={{marginTop:0,marginBottom:20,fontSize:18,fontWeight:800,color:'#111827'}}>Column Picker</h3>
 
                   <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',gap:16,marginBottom:20}}>
                     <div>
-                      <div style={{fontSize:12,fontWeight:700,marginBottom:8,color:'#666'}}>AVAILABLE COLUMNS</div>
+                      <div style={{fontSize:12,fontWeight:800,marginBottom:8,color:'#111827'}}>AVAILABLE COLUMNS</div>
                       <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:300,maxHeight:400,overflowY:'auto',background:'#fafafa'}}>
                         {mcPickerLeft.length === 0 ? (
-                          <div style={{padding:12,textAlign:'center',color:'#999',fontSize:12}}>No available columns</div>
+                          <div style={{padding:12,textAlign:'center',color:'#475569',fontSize:12,fontWeight:600}}>No available columns</div>
                         ) : (
                           <div>
                             {mcPickerLeft.map(col => (
@@ -2004,6 +2004,8 @@ export default function App(){
                                   cursor:'pointer',
                                   background:mcPickerLeftSelected.has(col) ? '#e3f2fd' : '#fafafa',
                                   fontSize:13,
+                                  color:'#111827',
+                                  fontWeight:600,
                                   userSelect:'none'
                                 }}
                               >
@@ -2033,10 +2035,10 @@ export default function App(){
                     </div>
 
                     <div>
-                      <div style={{fontSize:12,fontWeight:700,marginBottom:8,color:'#666'}}>SELECTED COLUMNS</div>
+                      <div style={{fontSize:12,fontWeight:800,marginBottom:8,color:'#111827'}}>SELECTED COLUMNS</div>
                       <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:300,maxHeight:400,overflowY:'auto',background:'#f0f9ff'}}>
                         {mcPickerRight.length === 0 ? (
-                          <div style={{padding:12,textAlign:'center',color:'#999',fontSize:12}}>No selected columns</div>
+                          <div style={{padding:12,textAlign:'center',color:'#475569',fontSize:12,fontWeight:600}}>No selected columns</div>
                         ) : (
                           <div>
                             {mcPickerRight.map((col, idx) => (
@@ -2054,6 +2056,8 @@ export default function App(){
                                   cursor:'pointer',
                                   background:mcPickerRightSelected.has(col) ? '#bbdefb' : '#f0f9ff',
                                   fontSize:13,
+                                  color:'#111827',
+                                  fontWeight:600,
                                   userSelect:'none',
                                   display:'flex',
                                   justifyContent:'space-between',
@@ -2061,7 +2065,7 @@ export default function App(){
                                 }}
                               >
                                 <span>{labelForColumn(col)}</span>
-                                <span style={{fontSize:11,color:'#999'}}>{idx + 1}</span>
+                                <span style={{fontSize:11,color:'#334155',fontWeight:700}}>{idx + 1}</span>
                               </div>
                             ))}
                           </div>
