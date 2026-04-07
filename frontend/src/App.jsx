@@ -1060,7 +1060,7 @@ export default function App(){
               value={loginUser}
               onChange={e=>setLoginUser(e.target.value)}
               onKeyDown={e=>{ if(e.key==='Enter') doLogin() }}
-              style={{padding:'10px 12px', borderRadius:6, border:'1px solid #cbd5e1', fontSize:15, outline:'none'}}
+              style={{padding:'10px 12px', borderRadius:6, border:'1px solid #cbd5e1', fontSize:15, outline:'none', color:'#111827', background:'#fff', fontWeight:500}}
             />
             <input
               placeholder='Password'
@@ -1068,7 +1068,7 @@ export default function App(){
               value={loginPass}
               onChange={e=>setLoginPass(e.target.value)}
               onKeyDown={e=>{ if(e.key==='Enter') doLogin() }}
-              style={{padding:'10px 12px', borderRadius:6, border:'1px solid #cbd5e1', fontSize:15, outline:'none'}}
+              style={{padding:'10px 12px', borderRadius:6, border:'1px solid #cbd5e1', fontSize:15, outline:'none', color:'#111827', background:'#fff', fontWeight:500}}
             />
             <button
               onClick={doLogin}
