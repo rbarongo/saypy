@@ -1596,7 +1596,16 @@ def report_members_collections(start_date: Optional[str] = None, end_date: Optio
         df = pd.read_sql_table('members_collection', con=engine)
         actor_church = _auth_context_church(auth)
         if actor_church is not None and 'church' in df.columns:
-            df = df[df['church'] == actor_church]
+            try:
+                actor_church_num = int(actor_church)
+            except Exception:
+                actor_church_num = None
+            if actor_church_num is not None:
+                # Coerce church values defensively for sqlite/postgres mixed type reads.
+                church_series = pd.to_numeric(df['church'], errors='coerce')
+                df = df[church_series == actor_church_num]
+            else:
+                df = df[df['church'].astype(str) == str(actor_church)]
         # Parse provided dates defensively. Accept either full ISO datetimes or simple YYYY-MM-DD.
         try:
             start_dt = pd.to_datetime(start_date, errors='coerce') if start_date else None
@@ -1619,6 +1628,8 @@ def report_members_collections(start_date: Optional[str] = None, end_date: Optio
         rows = df.to_dict(orient='records')
         out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
         return out
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
