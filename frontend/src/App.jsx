@@ -1960,16 +1960,16 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   return (
     <div>
       {promptState.open && (
-        <div style={{marginBottom:10, border:'1px solid #d0d7de', borderLeft:`5px solid ${promptState.level==='error' ? '#d1242f' : promptState.level==='warning' ? '#d97706' : promptState.level==='success' ? '#2f7d32' : '#2563eb'}`, background:'#f8fafc', padding:10, borderRadius:6}}>
+        <div style={{marginBottom:10, border:'1px solid #d0d7de', borderLeft:`5px solid ${promptState.level==='error' ? '#d1242f' : promptState.level==='warning' ? '#d97706' : promptState.level==='success' ? '#2f7d32' : '#2563eb'}`, background:'#f8fafc', padding:12, borderRadius:8}}>
           <div style={{display:'flex', justifyContent:'space-between', gap:8, alignItems:'center', marginBottom:8}}>
-            <strong>{promptState.level==='error' ? 'Error' : promptState.level==='warning' ? 'Warning' : promptState.level==='success' ? 'Success' : 'Info'}</strong>
+            <strong style={{color:'#111827', fontSize:16, fontWeight:800, letterSpacing:'0.01em'}}>{promptState.level==='error' ? 'Error' : promptState.level==='warning' ? 'Warning' : promptState.level==='success' ? 'Success' : 'Info'}</strong>
             <div style={{display:'flex', gap:8}}>
               <button onClick={copyPromptMessage}>Copy message</button>
               <button onClick={()=> setPromptState(prev=> ({...prev, open:false}))}>Close</button>
             </div>
           </div>
-          <textarea readOnly value={promptState.message} style={{width:'100%', minHeight:90, fontFamily:'Consolas, monospace', fontSize:13, padding:8, border:'1px solid #cbd5e1', borderRadius:4, background:'#ffffff'}} />
-          {copiedPrompt && <div style={{marginTop:6, color:'#2f7d32'}}>Message copied to clipboard.</div>}
+          <div style={{width:'100%', minHeight:70, whiteSpace:'pre-wrap', fontFamily:'Segoe UI, Arial, sans-serif', fontSize:15, fontWeight:600, lineHeight:1.45, color:'#111827', padding:'10px 12px', border:'1px solid #cbd5e1', borderRadius:6, background:'#ffffff'}}>{promptState.message}</div>
+          {copiedPrompt && <div style={{marginTop:8, color:'#14532d', fontWeight:700}}>Message copied to clipboard.</div>}
         </div>
       )}
       <div style={{marginBottom:8,color:'#333'}}>Step {step} of {totalSteps}</div>
