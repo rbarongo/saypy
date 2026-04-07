@@ -162,8 +162,9 @@ export default function App(){
   const [localCollectionCodes, setLocalCollectionCodes] = useState([])
   const [newCodeColumn, setNewCodeColumn] = useState('')
   const [newCodeLabel, setNewCodeLabel] = useState('')
+  const [newCodeCustomName, setNewCodeCustomName] = useState('')
   const [editingCodeId, setEditingCodeId] = useState(null)
-  const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:''})
+  const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:'', custom_collection_name:''})
   const [showCollectionCodesPanel, setShowCollectionCodesPanel] = useState(true)
   const [collectionCodesMaxRows, setCollectionCodesMaxRows] = useState(30)
   const [editingRole, setEditingRole] = useState(null)
@@ -212,12 +213,13 @@ export default function App(){
       const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes`, {
         method: 'POST',
         headers: {...authHeaders(), 'Content-Type':'application/json'},
-        body: JSON.stringify({column_name: newCodeColumn, code: newCodeLabel})
+        body: JSON.stringify({column_name: newCodeColumn, code: newCodeLabel, custom_collection_name: (newCodeCustomName || null)})
       })
       const data = await res.json().catch(()=>({}))
       if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
       setNewCodeColumn('')
       setNewCodeLabel('')
+      setNewCodeCustomName('')
       fetchLocalCodes()
       setStatus('Code created successfully')
     }catch(e){ setStatus('Create code failed: '+e.message) }
@@ -230,12 +232,12 @@ export default function App(){
       const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes/${editingCodeId}`, {
         method: 'PUT',
         headers: {...authHeaders(), 'Content-Type':'application/json'},
-        body: JSON.stringify({column_name: editCodeForm.column_name, code: editCodeForm.code})
+        body: JSON.stringify({column_name: editCodeForm.column_name, code: editCodeForm.code, custom_collection_name: (editCodeForm.custom_collection_name || null)})
       })
       const data = await res.json().catch(()=>({}))
       if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
       setEditingCodeId(null)
-      setEditCodeForm({column_name:'', code:''})
+      setEditCodeForm({column_name:'', code:'', custom_collection_name:''})
       fetchLocalCodes()
       setStatus('Code updated successfully')
     }catch(e){ setStatus('Update code failed: '+e.message) }
@@ -1322,8 +1324,13 @@ export default function App(){
 
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
               <h4>Collection Codes</h4>
+              {(() => {
+                const canCollectionCodeEdit = hasRoleRight('can_manage_collections', true) || hasRoleRight('can_view_collection_codes', true)
+                const localChurchCollectionCodes = (localCollectionCodes || []).filter(c=> Number(c.church)===Number(currentUserChurchId))
+                return (
+                  <>
               <p style={{fontSize:12,color:'#666'}}>
-                {hasRoleRight('can_manage_collections', true) 
+                {canCollectionCodeEdit 
                   ? 'View existing church collection codes, edit them, or add more for your church.' 
                   : 'View existing church collection codes.'}
               </p>
@@ -1350,12 +1357,13 @@ export default function App(){
                 </div>
               )}
 
-              {hasRoleRight('can_manage_collections', true) && (
+              {canCollectionCodeEdit && (
                 <div style={{marginBottom:12}}>
                   <h5>Add New Code</h5>
                   <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                    <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Collection name' disabled={!currentUserChurchId} />
-                    <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Code' disabled={!currentUserChurchId} />
+                    <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Code key (e.g. c21)' disabled={!currentUserChurchId} />
+                    <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Collection label' disabled={!currentUserChurchId} />
+                    <input type='text' value={newCodeCustomName} onChange={e=>setNewCodeCustomName(e.target.value)} placeholder='Custom collection name (optional)' disabled={!currentUserChurchId} />
                     <button onClick={createLocalCode} disabled={!currentUserChurchId}>Add Code</button>
                   </div>
                 </div>
@@ -1363,33 +1371,35 @@ export default function App(){
 
               {showCollectionCodesPanel && (
               <div>
-                <h5>Existing Codes</h5>
-                {localCollectionCodes.length === 0 ? (
+                <h5>Church Collection Codes Grid (Church ID: {currentUserChurchId || '-'})</h5>
+                {localChurchCollectionCodes.length === 0 ? (
                   <div style={{color:'#666'}}>No collection codes found for this church.</div>
                 ) : (
                   <table border={1} cellPadding={6} style={{borderCollapse:'collapse',width:'100%'}}>
-                    <thead><tr><th>Collection Name</th><th>Code</th><th>Scope</th>{hasRoleRight('can_manage_collections', true) && <th>Actions</th>}</tr></thead>
+                    <thead><tr><th>ID</th><th>Church ID</th><th>Code Key</th><th>Label</th><th>Custom Name</th><th>Scope</th>{canCollectionCodeEdit && <th>Actions</th>}</tr></thead>
                     <tbody>
-                      {localCollectionCodes.slice(0, collectionCodesMaxRows).map(code=> (
+                      {localChurchCollectionCodes.slice(0, collectionCodesMaxRows).map(code=> (
                         <tr key={code.id}>
+                          <td>{code.id}</td>
+                          <td>{code.church}</td>
                           <td>{code.column_name}</td>
                           <td>{code.code}</td>
-                          <td>{Number(code.church)===Number(currentUserChurchId) ? 'Local' : 'Global'}</td>
-                          {hasRoleRight('can_manage_collections', true) && (
+                          <td>{code.custom_collection_name || '-'}</td>
+                          <td>Local</td>
+                          {canCollectionCodeEdit && (
                             <td>
-                              {Number(code.church)!==Number(currentUserChurchId) ? (
-                                <span style={{color:'#666'}}>Read-only</span>
-                              ) : editingCodeId !== code.id ? (
+                              {editingCodeId !== code.id ? (
                                 <>
-                                  <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code}); }} style={{marginRight:8}}>Edit</button>
-                                  <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>
+                                  <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code, custom_collection_name:(code.custom_collection_name || '')}); }} style={{marginRight:8}}>Edit</button>
+                                  {hasRoleRight('can_manage_collections', true) && <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>}
                                 </>
                               ) : (
                                 <>
                                   <input type='text' value={editCodeForm.column_name} onChange={e=>setEditCodeForm({...editCodeForm,column_name:e.target.value})} style={{marginRight:4}} />
                                   <input type='text' value={editCodeForm.code} onChange={e=>setEditCodeForm({...editCodeForm,code:e.target.value})} style={{marginRight:4}} />
+                                  <input type='text' value={editCodeForm.custom_collection_name} onChange={e=>setEditCodeForm({...editCodeForm,custom_collection_name:e.target.value})} style={{marginRight:4}} />
                                   <button onClick={updateLocalCode} style={{marginRight:4}}>Save</button>
-                                  <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:''}); }}>Cancel</button>
+                                  <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:'',custom_collection_name:''}); }}>Cancel</button>
                                 </>
                               )}
                             </td>
@@ -1401,6 +1411,9 @@ export default function App(){
                 )}
               </div>
               )}
+                  </>
+                )
+              })()}
             </div>
           </div>
         )}

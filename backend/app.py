@@ -1308,7 +1308,7 @@ def create_church_collection_code(church_id: int, payload: CollectionCodeIn, cur
     """Create a church-specific collection code for users with collection rights."""
     try:
         user_church = current_user.get('church')
-        if not _role_has_right(current_user.get('role'), 'can_manage_collections'):
+        if not (_role_has_right(current_user.get('role'), 'can_manage_collections') or _role_has_right(current_user.get('role'), 'can_view_collection_codes')):
             raise HTTPException(status_code=403, detail='Not authorized for collection code creation')
         if not _is_system_admin_user(current_user) and user_church != church_id:
             raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
@@ -1332,7 +1332,7 @@ def update_church_collection_code(church_id: int, code_id: int, payload: Collect
     """Update a church-specific collection code for users with collection rights."""
     try:
         user_church = current_user.get('church')
-        if not _role_has_right(current_user.get('role'), 'can_manage_collections'):
+        if not (_role_has_right(current_user.get('role'), 'can_manage_collections') or _role_has_right(current_user.get('role'), 'can_view_collection_codes')):
             raise HTTPException(status_code=403, detail='Not authorized for collection code update')
         if not _is_system_admin_user(current_user) and user_church != church_id:
             raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
