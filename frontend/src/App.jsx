@@ -608,13 +608,30 @@ export default function App(){
   const [mcFilterText, setMcFilterText] = useState('')
   const [mcSearchField, setMcSearchField] = useState('all')
   const [mcFilterCode, setMcFilterCode] = useState('')
+  const [mcFilterMemberId, setMcFilterMemberId] = useState('')
+  const [mcFilterMemberName, setMcFilterMemberName] = useState('')
+  const [mcFilterS1, setMcFilterS1] = useState('')
+  const [mcFilterAmountMin, setMcFilterAmountMin] = useState('')
+  const [mcFilterAmountMax, setMcFilterAmountMax] = useState('')
   const [mcFrom, setMcFrom] = useState('')
   const [mcTo, setMcTo] = useState('')
-  const [mcApplied, setMcApplied] = useState({ searchField: 'all', text: '', code: '', from: '', to: '' })
+  const [mcApplied, setMcApplied] = useState({
+    searchField: 'all',
+    text: '',
+    code: '',
+    memberId: '',
+    memberName: '',
+    s1: '',
+    amountMin: '',
+    amountMax: '',
+    from: '',
+    to: '',
+  })
   const [mcSortKey, setMcSortKey] = useState('id')
   const [mcSortDir, setMcSortDir] = useState('desc')
   const [mcPage, setMcPage] = useState(1)
-  const [mcPageSize, setMcPageSize] = useState(30)
+  const [mcPageSize, setMcPageSize] = useState(10)
+  const [mcVisibleCols, setMcVisibleCols] = useState([])
   const [editingCollection, setEditingCollection] = useState(null)
 
   // Load members when navigating to Members page
@@ -625,6 +642,10 @@ export default function App(){
   // Load members_collections when navigating to the Members Collections page
   useEffect(()=>{
     if(page==='members_collections'){
+      setMcSortKey('id')
+      setMcSortDir('desc')
+      setMcPage(1)
+      setMcPageSize(10)
       setStatus('Loading collections...')
       fetchMembersCollections().then(()=>{
         // Keep error/status set by fetchMembersCollections when request fails.
@@ -773,9 +794,131 @@ export default function App(){
         const keys = Object.keys(scoped[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
         if(!keys.includes('verified')) keys.push('verified')
         setMembersCollectionsFields(keys)
+        if(!mcVisibleCols.length) setMcVisibleCols(keys)
       }
       return true
     }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]); return false }
+  }
+
+  function getMcAllColumns(){
+    const fallback = ['id','collection_code','member_id','church','s1','s2','s3','s4','s5','verified']
+    return (membersCollectionsFields && membersCollectionsFields.length) ? membersCollectionsFields : fallback
+  }
+
+  function getMcDisplayColumns(){
+    const all = getMcAllColumns()
+    if(!mcVisibleCols.length) return all
+    const cols = mcVisibleCols.filter(c => all.includes(c))
+    return cols.length ? cols : all
+  }
+
+  function getFilteredMembersCollectionsRows(){
+    let rows = Array.isArray(membersCollections) ? membersCollections : []
+    if(currentUserChurchId !== null && currentUserChurchId !== undefined && !Number.isNaN(Number(currentUserChurchId))){
+      rows = rows.filter(r => Number(r?.church) === Number(currentUserChurchId))
+    }
+    if(mcApplied.code){
+      rows = rows.filter(r=> {
+        try{ return r.collection_code === mcApplied.code || r.collection_code === (collectionCodes.find(c=>c.column_name===mcApplied.code)?.code) }
+        catch(e){ return false }
+      })
+    }
+    if(mcApplied.memberId){
+      const q = String(mcApplied.memberId).toLowerCase()
+      rows = rows.filter(r => String(r?.member_id ?? '').toLowerCase().includes(q))
+    }
+    if(mcApplied.memberName){
+      const q = String(mcApplied.memberName).toLowerCase()
+      rows = rows.filter(r => String(r?.s4 ?? '').toLowerCase().includes(q))
+    }
+    if(mcApplied.s1){
+      const q = String(mcApplied.s1).toLowerCase()
+      rows = rows.filter(r => String(r?.s1 ?? '').toLowerCase().includes(q))
+    }
+    if(mcApplied.text){
+      rows = rows.filter(r => {
+        try{
+          const q = mcApplied.text.toLowerCase()
+          if(mcApplied.searchField === 'all') return Object.values(r).join(' ').toLowerCase().includes(q)
+          return String(r?.[mcApplied.searchField] ?? '').toLowerCase().includes(q)
+        }catch(e){ return false }
+      })
+    }
+    if(mcApplied.from){
+      const dfrom = new Date(mcApplied.from)
+      rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) >= dfrom }catch(e){ return false } })
+    }
+    if(mcApplied.to){
+      const dto = new Date(mcApplied.to)
+      rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) <= dto }catch(e){ return false } })
+    }
+    if(mcApplied.amountMin !== '' && mcApplied.amountMin !== null){
+      const n = Number(mcApplied.amountMin)
+      if(!Number.isNaN(n)) rows = rows.filter(r => Number(r?.s5 ?? 0) >= n)
+    }
+    if(mcApplied.amountMax !== '' && mcApplied.amountMax !== null){
+      const n = Number(mcApplied.amountMax)
+      if(!Number.isNaN(n)) rows = rows.filter(r => Number(r?.s5 ?? 0) <= n)
+    }
+    rows = rows.slice().sort((a,b)=>{
+      const va = a && a[mcSortKey]
+      const vb = b && b[mcSortKey]
+      if(va==null && vb==null) return 0
+      if(va==null) return mcSortDir==='asc' ? -1 : 1
+      if(vb==null) return mcSortDir==='asc' ? 1 : -1
+      if(typeof va === 'number' && typeof vb === 'number') return mcSortDir==='asc' ? va-vb : vb-va
+      return mcSortDir==='asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
+    })
+    return rows
+  }
+
+  function escapeHtml(value){
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  function exportMembersCollectionsExcel(){
+    try{
+      const cols = getMcDisplayColumns()
+      const rows = getFilteredMembersCollectionsRows()
+      const head = cols.map(c=>`<th>${escapeHtml(labelForColumn(c))}</th>`).join('')
+      const body = rows.map(r=> `<tr>${cols.map(c=> `<td>${escapeHtml(c==='verified' ? (r && r.__verified ? 'Yes' : 'No') : displayCellValue(c, r))}</td>`).join('')}</tr>`).join('')
+      const table = `<table border="1"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+      const html = `<!doctype html><html><head><meta charset="utf-8" /></head><body>${table}</body></html>`
+      const blob = new Blob([html], { type: 'application/vnd.ms-excel' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const stamp = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')
+      a.href = url
+      a.download = `members_collections_church_${currentUserChurchId || 'all'}_${stamp}.xls`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }catch(e){
+      setStatus('Export Excel failed: ' + (e?.message || String(e)))
+    }
+  }
+
+  function exportMembersCollectionsPdf(){
+    try{
+      const cols = getMcDisplayColumns()
+      const rows = getFilteredMembersCollectionsRows()
+      const head = cols.map(c=>`<th style="border:1px solid #ccc;padding:6px;text-align:left">${escapeHtml(labelForColumn(c))}</th>`).join('')
+      const body = rows.map(r=> `<tr>${cols.map(c=> `<td style="border:1px solid #ddd;padding:6px">${escapeHtml(c==='verified' ? (r && r.__verified ? 'Yes' : 'No') : displayCellValue(c, r))}</td>`).join('')}</tr>`).join('')
+      const win = window.open('', '_blank')
+      if(!win){ setStatus('Pop-up blocked. Allow pop-ups to export PDF.'); return }
+      win.document.write(`<!doctype html><html><head><title>Members Collections</title><style>body{font-family:Arial,sans-serif;padding:12px}table{border-collapse:collapse;width:100%;font-size:12px}h3{margin:0 0 10px 0}</style></head><body><h3>Members Collections (Church ${escapeHtml(currentUserChurchId || '-')})</h3><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`)
+      win.document.close()
+      win.focus()
+      win.print()
+    }catch(e){
+      setStatus('Export PDF failed: ' + (e?.message || String(e)))
+    }
   }
 
   // Simple Levenshtein distance for fuzzy matching
@@ -1634,7 +1777,7 @@ export default function App(){
           <div>
             <h3>Members Collections</h3>
             <div style={{marginBottom:8,fontSize:13,color:'#475569',fontWeight:600}}>
-              Showing records for your church only (Church ID: {currentUserChurchId || '-'})
+              Showing latest records for your church only (Church ID: {currentUserChurchId || '-'})
             </div>
             <div style={{marginBottom:8, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
               <button onClick={fetchMembersCollections}>Refresh</button>
@@ -1647,37 +1790,90 @@ export default function App(){
                 <option value='s1'>S1</option>
                 <option value='church'>Church</option>
               </select>
-              <input placeholder='Search' value={mcFilterText} onChange={e=>setMcFilterText(e.target.value)} />
+              <input placeholder='Search text' value={mcFilterText} onChange={e=>setMcFilterText(e.target.value)} />
               <select value={mcFilterCode} onChange={e=>setMcFilterCode(e.target.value)}>
                 <option value=''>-- all codes --</option>
                 {(collectionCodes||[]).map(c=> <option key={c.column_name} value={c.column_name}>{c.code || c.column_name}</option>)}
               </select>
+              <input placeholder='Member ID' value={mcFilterMemberId} onChange={e=>setMcFilterMemberId(e.target.value)} />
+              <input placeholder='Member name' value={mcFilterMemberName} onChange={e=>setMcFilterMemberName(e.target.value)} />
+              <input placeholder='S1 contains' value={mcFilterS1} onChange={e=>setMcFilterS1(e.target.value)} />
               <button onClick={()=> verifyNames()}>Verify Names</button>
               <label>From</label>
               <input type='date' value={mcFrom} onChange={e=>setMcFrom(e.target.value)} />
               <label>To</label>
               <input type='date' value={mcTo} onChange={e=>setMcTo(e.target.value)} />
+              <label>Amount min</label>
+              <input type='number' step='0.01' value={mcFilterAmountMin} onChange={e=>setMcFilterAmountMin(e.target.value)} style={{width:110}} />
+              <label>Amount max</label>
+              <input type='number' step='0.01' value={mcFilterAmountMax} onChange={e=>setMcFilterAmountMax(e.target.value)} style={{width:110}} />
               <button onClick={()=>{
                 setMcApplied({
                   searchField: mcSearchField,
                   text: mcFilterText,
                   code: mcFilterCode,
+                  memberId: mcFilterMemberId,
+                  memberName: mcFilterMemberName,
+                  s1: mcFilterS1,
+                  amountMin: mcFilterAmountMin,
+                  amountMax: mcFilterAmountMax,
                   from: mcFrom,
                   to: mcTo,
                 })
                 setMcPage(1)
               }}>Submit</button>
+              <button onClick={()=>{
+                setMcFilterText('')
+                setMcFilterCode('')
+                setMcFilterMemberId('')
+                setMcFilterMemberName('')
+                setMcFilterS1('')
+                setMcFilterAmountMin('')
+                setMcFilterAmountMax('')
+                setMcFrom('')
+                setMcTo('')
+                setMcApplied({ searchField: 'all', text: '', code: '', memberId: '', memberName: '', s1: '', amountMin: '', amountMax: '', from: '', to: '' })
+                setMcPage(1)
+              }}>Clear</button>
               <label>Max rows</label>
               <select value={mcPageSize} onChange={e=>{ setMcPageSize(Number(e.target.value)); setMcPage(1) }}>
                 {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
               </select>
+              <button onClick={exportMembersCollectionsExcel}>Export Excel</button>
+              <button onClick={exportMembersCollectionsPdf}>Export PDF</button>
+            </div>
+
+            <div style={{marginBottom:10,padding:'10px 12px',border:'1px solid #ddd',borderRadius:8,background:'#f8fafc'}}>
+              <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>Display columns</div>
+              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                {getMcAllColumns().map(col => (
+                  <label key={col} style={{display:'flex',gap:6,alignItems:'center',fontSize:13,color:'#1f2937'}}>
+                    <input
+                      type='checkbox'
+                      checked={getMcDisplayColumns().includes(col)}
+                      onChange={e=>{
+                        if(e.target.checked){
+                          setMcVisibleCols(prev => Array.from(new Set([...(prev.length ? prev : getMcAllColumns()), col])))
+                        }else{
+                          setMcVisibleCols(prev => {
+                            const base = prev.length ? prev : getMcAllColumns()
+                            const next = base.filter(x => x !== col)
+                            return next.length ? next : base
+                          })
+                        }
+                      }}
+                    />
+                    {labelForColumn(col)}
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div className='table-wrap' style={mainGridWrapStyle(500)}>
               <table style={mainGridTableStyle(true)}>
                 <thead>
                   <tr>
-                    {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(c=> (
+                    {getMcDisplayColumns().map(c=> (
                       <th key={c} style={{cursor:'pointer'}} onClick={()=>{
                         if(mcSortKey===c) setMcSortDir(d=> d==='asc'? 'desc':'asc'); else { setMcSortKey(c); setMcSortDir('asc') }
                       }}>{labelForColumn(c)} {mcSortKey===c? (mcSortDir==='asc'? '▲':'▼') : ''}</th>
@@ -1688,37 +1884,13 @@ export default function App(){
                 <tbody>
                   {(() => {
                     try{
-                      // apply client-side filters/sort/paging
-                      let rows = Array.isArray(membersCollections) ? membersCollections : [];
-                      rows = (currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId)))
-                        ? rows
-                        : rows.filter(r => Number(r?.church) === Number(currentUserChurchId))
-                      if(mcApplied.code) rows = rows.filter(r=> {
-                        try{ return r.collection_code === mcApplied.code || r.collection_code === (collectionCodes.find(c=>c.column_name===mcApplied.code)?.code) }
-                        catch(e){ return false }
-                      })
-                      if(mcApplied.text) rows = rows.filter(r => {
-                        try{
-                          const q = mcApplied.text.toLowerCase()
-                          if(mcApplied.searchField === 'all') return Object.values(r).join(' ').toLowerCase().includes(q)
-                          return String(r?.[mcApplied.searchField] ?? '').toLowerCase().includes(q)
-                        }catch(e){ return false }
-                      })
-                      if(mcApplied.from){ const dfrom = new Date(mcApplied.from); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) >= dfrom }catch(e){return false} }) }
-                      if(mcApplied.to){ const dto = new Date(mcApplied.to); rows = rows.filter(r=> { try{ return r.s2 && new Date(r.s2) <= dto }catch(e){return false} }) }
-                      // sort
-                      rows = rows.slice().sort((a,b)=>{
-                        const va = a && a[mcSortKey]; const vb = b && b[mcSortKey];
-                        if(va==null && vb==null) return 0; if(va==null) return mcSortDir==='asc'? -1:1; if(vb==null) return mcSortDir==='asc'? 1:-1;
-                        if(typeof va === 'number' && typeof vb === 'number') return mcSortDir==='asc'? va-vb : vb-va;
-                        return mcSortDir==='asc'? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-                      })
-                      const total = rows.length;
+                      const rows = getFilteredMembersCollectionsRows()
+                      const total = rows.length
                       const start = (mcPage-1)*mcPageSize; const end = start + mcPageSize
                       const pageRows = rows.slice(start, end)
                       return pageRows.map((r,idx)=> (
                         <tr key={r && (r.id||idx)}>
-                          {(membersCollectionsFields.length? membersCollectionsFields : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']).map(k=> {
+                          {getMcDisplayColumns().map(k=> {
                             if(k === 'verified') return <td key={k}>{r && r.__verified? 'Yes':'No'}</td>
                             return <td key={k}>{displayCellValue(k, r)}</td>
                           })}
@@ -1729,16 +1901,19 @@ export default function App(){
                       ))
                     }catch(err){
                       console.error('Render error in members_collections table', err)
-                      return <tr><td colSpan={ (membersCollectionsFields.length? membersCollectionsFields.length:10) + 1 }>Error rendering collections: {String(err.message||err)}</td></tr>
+                      return <tr><td colSpan={ getMcDisplayColumns().length + 1 }>Error rendering collections: {String(err.message||err)}</td></tr>
                     }
                   })()}
                 </tbody>
               </table>
             </div>
             <div style={{marginTop:8}}>
-              <button onClick={()=> setMcPage(p=> Math.max(1,p-1))}>Prev</button>
-              <span style={{margin:'0 8px'}}>Page {mcPage}</span>
-              <button onClick={()=> setMcPage(p=> p+1)}>Next</button>
+              <button onClick={()=> setMcPage(p=> Math.max(1,p-1))} disabled={mcPage<=1}>Prev</button>
+              <span style={{margin:'0 8px'}}>Page {mcPage} / {Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))} ({getFilteredMembersCollectionsRows().length} records)</span>
+              <button onClick={()=> setMcPage(p=> {
+                const pages = Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))
+                return Math.min(pages, p+1)
+              })} disabled={mcPage >= Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))}>Next</button>
             </div>
 
             {/* Edit modal */}
