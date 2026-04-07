@@ -183,6 +183,23 @@ def compute_members_collection_s1(s2_value, church_value, s3_value) -> Optional[
     return f"{ymd}{int(church_id):03d}{int(s3num):03d}"
 
 
+def _extract_members_collection_parts_from_s1(s1_value) -> Tuple[Optional[datetime], Optional[int], Optional[int]]:
+    """Parse canonical s1 into (date, church_id, s3). Expected format YYYYMMDDCCCNNN."""
+    s1_text = _coerce_s1_text(s1_value)
+    if not s1_text:
+      return None, None, None
+    digits = ''.join(ch for ch in str(s1_text) if ch.isdigit())
+    if len(digits) < 14:
+        return None, None, None
+    try:
+        dt = datetime.strptime(digits[:8], '%Y%m%d')
+    except Exception:
+        dt = None
+    church_id = _coerce_int(digits[8:11])
+    s3num = _coerce_int(digits[11:14])
+    return dt, church_id, s3num
+
+
 def _load_existing_serial_counters(keys: List[Tuple[str, int]]) -> Dict[Tuple[str, int], int]:
     counters: Dict[Tuple[str, int], int] = {}
     if not keys:
@@ -217,6 +234,12 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
     for row in rows:
         dt = _parse_collection_dt(row.get('s2') if isinstance(row, dict) else None)
         ch = _coerce_int(row.get('church') if isinstance(row, dict) else None)
+        if (dt is None or ch is None) and isinstance(row, dict):
+            s1_dt, s1_ch, _ = _extract_members_collection_parts_from_s1(row.get('s1'))
+            if dt is None:
+                dt = s1_dt
+            if ch is None:
+                ch = s1_ch
         if dt is not None and ch is not None:
             keys.add((dt.strftime('%Y-%m-%d'), int(ch)))
 
@@ -233,10 +256,18 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
         if s2dt is not None:
             r['s2'] = s2dt
         church_id = _coerce_int(r.get('church'))
+        s1dt, s1church, s1s3 = _extract_members_collection_parts_from_s1(r.get('s1'))
+        if s2dt is None and s1dt is not None:
+            s2dt = s1dt
+            r['s2'] = s2dt
+        if church_id is None and s1church is not None:
+            church_id = s1church
         if church_id is not None:
             r['church'] = church_id
 
         s3num = _coerce_int(r.get('s3'))
+        if s3num is None and s1s3 is not None:
+            s3num = s1s3
         if fill_missing_s3 and s3num is None and s2dt is not None and church_id is not None:
             k = (s2dt.strftime('%Y-%m-%d'), int(church_id))
             nxt = counters.get(k, 0) + 1
@@ -273,12 +304,20 @@ def backfill_members_collection_identifiers() -> int:
 
     for rid, s2, church, s3, s1 in rows:
         dt = _parse_collection_dt(s2)
-        ch = _coerce_int(church)
+        original_ch = _coerce_int(church)
+        ch = original_ch
         s3n = _coerce_int(s3)
+        s1dt, s1ch, s1s3 = _extract_members_collection_parts_from_s1(s1)
+        if dt is None:
+            dt = s1dt
+        if ch is None:
+            ch = s1ch
+        if s3n is None:
+            s3n = s1s3
         key = (dt.strftime('%Y-%m-%d'), int(ch)) if dt is not None and ch is not None else None
         if key and s3n is not None:
             counters[key] = max(counters.get(key, 0), s3n)
-        normalized.append({'id': rid, 'dt': dt, 'church': ch, 's3': s3n, 's1': _coerce_s1_text(s1), 'key': key})
+        normalized.append({'id': rid, 'dt': dt, 'church': ch, 'original_church': original_ch, 's3': s3n, 's1': _coerce_s1_text(s1), 'key': key})
 
     updated = 0
     with engine.begin() as conn:
@@ -296,10 +335,10 @@ def backfill_members_collection_identifiers() -> int:
             if new_s1 is None:
                 continue
 
-            if item['s1'] != str(new_s1) or item['s3'] != s3n:
+            if item['s1'] != str(new_s1) or item['s3'] != s3n or item.get('original_church') != ch:
                 conn.execute(
-                    text('UPDATE members_collection SET s3=:s3, s1=:s1 WHERE id=:id'),
-                    {'s3': int(s3n), 's1': str(new_s1), 'id': item['id']}
+                    text('UPDATE members_collection SET church=:church, s3=:s3, s1=:s1 WHERE id=:id'),
+                    {'church': int(ch) if ch is not None else None, 's3': int(s3n), 's1': str(new_s1), 'id': item['id']}
                 )
                 updated += 1
     return updated
