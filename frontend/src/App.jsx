@@ -1042,6 +1042,7 @@ export default function App(){
           <div style={{fontWeight:700,marginBottom:10}}>Menu</div>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {hasRoleRight('can_view_dashboard', true) && <button onClick={()=>setPage('dashboard')} style={{textAlign:'left',background:page==='dashboard' ? '#e8f0fe' : '#fff'}}>Dashboard</button>}
+            <button onClick={()=>setPage('preferences')} style={{textAlign:'left',background:page==='preferences' ? '#e8f0fe' : '#fff'}}>Preferences</button>
             {(hasRoleRight('can_manage_collections', true) || hasRoleRight('can_view_collection_codes', true)) && <button onClick={()=>setPage('collections')} style={{textAlign:'left',background:page==='collections' ? '#e8f0fe' : '#fff'}}>Collections</button>}
             {hasRoleRight('can_manage_members', true) && <button onClick={()=>setPage('members')} style={{textAlign:'left',background:page==='members' ? '#e8f0fe' : '#fff'}}>Members</button>}
             {hasRoleRight('can_manage_members_collections', true) && <button onClick={()=>setPage('members_collections')} style={{textAlign:'left',background:page==='members_collections' ? '#e8f0fe' : '#fff'}}>Members Collections</button>}
@@ -1073,6 +1074,70 @@ export default function App(){
             </div>
           </div>
         )}
+
+        {page==='preferences' && (
+          <div>
+            <h3>Preferences</h3>
+
+            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+              <h4>My Grid Preferences</h4>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12}}>
+                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
+                  <div style={{fontWeight:700,marginBottom:8}}>Main Grids Mode</div>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+                    <input type='radio' name='main-grid-mode-preferences' checked={gridModeMain==='scrollable'} onChange={()=>setGridModeMain('scrollable')} />
+                    Scrollable
+                  </label>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
+                    <input type='radio' name='main-grid-mode-preferences' checked={gridModeMain==='classic'} onChange={()=>setGridModeMain('classic')} />
+                    Classic
+                  </label>
+                </div>
+                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
+                  <div style={{fontWeight:700,marginBottom:8}}>Upload Grids Mode</div>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+                    <input type='radio' name='upload-grid-mode-preferences' checked={uploadGridMode==='scrollable'} onChange={()=>setUploadGridMode('scrollable')} />
+                    Scrollable
+                  </label>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
+                    <input type='radio' name='upload-grid-mode-preferences' checked={uploadGridMode==='classic'} onChange={()=>setUploadGridMode('classic')} />
+                    Classic
+                  </label>
+                </div>
+                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
+                  <div style={{fontWeight:700,marginBottom:8}}>Mapped Preview Mode</div>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+                    <input type='radio' name='mapped-preview-mode-preferences' checked={mappedPreviewMode==='scrollable'} onChange={()=>setMappedPreviewMode('scrollable')} />
+                    Scrollable
+                  </label>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
+                    <input type='radio' name='mapped-preview-mode-preferences' checked={mappedPreviewMode==='classic'} onChange={()=>setMappedPreviewMode('classic')} />
+                    Classic
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+              <h4>Change My Password</h4>
+              {!showOwnPasswordForm ? (
+                <button onClick={()=> setShowOwnPasswordForm(true)}>Change Password</button>
+              ) : (
+                <>
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <input type='password' placeholder='Current password' value={ownCurrentPassword} onChange={e=>setOwnCurrentPassword(e.target.value)} />
+                    <input type='password' placeholder='New password' value={ownNewPassword} onChange={e=>setOwnNewPassword(e.target.value)} />
+                    <input type='password' placeholder='Confirm new password' value={ownConfirmPassword} onChange={e=>setOwnConfirmPassword(e.target.value)} />
+                    <button onClick={submitOwnPasswordReset}>Update Password</button>
+                    <button onClick={()=> setShowOwnPasswordForm(false)}>Cancel</button>
+                  </div>
+                  <div style={{marginTop:6,fontSize:12,color:'#666'}}>{PASSWORD_HINT}</div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {page==='admin' && (
           <div>
             <h3>Admin — Manage Users</h3>
@@ -1176,63 +1241,6 @@ export default function App(){
           <div>
             <h3>Settings</h3>
             {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,marginBottom:12,borderRadius:6}}>⚠️ You do not have a church assigned. Only local church admins can access settings.</div>}
-
-            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
-              <h4>My Settings</h4>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12}}>
-                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
-                  <div style={{fontWeight:700,marginBottom:8}}>Main Grids Mode</div>
-                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-                    <input type='radio' name='main-grid-mode-settings' checked={gridModeMain==='scrollable'} onChange={()=>setGridModeMain('scrollable')} />
-                    Scrollable
-                  </label>
-                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
-                    <input type='radio' name='main-grid-mode-settings' checked={gridModeMain==='classic'} onChange={()=>setGridModeMain('classic')} />
-                    Classic
-                  </label>
-                </div>
-                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
-                  <div style={{fontWeight:700,marginBottom:8}}>Upload Grids Mode</div>
-                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-                    <input type='radio' name='upload-grid-mode-settings' checked={uploadGridMode==='scrollable'} onChange={()=>setUploadGridMode('scrollable')} />
-                    Scrollable
-                  </label>
-                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
-                    <input type='radio' name='upload-grid-mode-settings' checked={uploadGridMode==='classic'} onChange={()=>setUploadGridMode('classic')} />
-                    Classic
-                  </label>
-                </div>
-                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
-                  <div style={{fontWeight:700,marginBottom:8}}>Mapped Preview Mode</div>
-                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-                    <input type='radio' name='mapped-preview-mode-settings' checked={mappedPreviewMode==='scrollable'} onChange={()=>setMappedPreviewMode('scrollable')} />
-                    Scrollable
-                  </label>
-                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
-                    <input type='radio' name='mapped-preview-mode-settings' checked={mappedPreviewMode==='classic'} onChange={()=>setMappedPreviewMode('classic')} />
-                    Classic
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
-              <h4>Change My Password</h4>
-              {!showOwnPasswordForm ? (
-                <button onClick={()=> setShowOwnPasswordForm(true)}>Change Password</button>
-              ) : (
-                <>
-                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                    <input type='password' placeholder='Current password' value={ownCurrentPassword} onChange={e=>setOwnCurrentPassword(e.target.value)} />
-                    <input type='password' placeholder='New password' value={ownNewPassword} onChange={e=>setOwnNewPassword(e.target.value)} />
-                    <input type='password' placeholder='Confirm new password' value={ownConfirmPassword} onChange={e=>setOwnConfirmPassword(e.target.value)} />
-                    <button onClick={submitOwnPasswordReset}>Update Password</button>
-                    <button onClick={()=> setShowOwnPasswordForm(false)}>Cancel</button>
-                  </div>
-                  <div style={{marginTop:6,fontSize:12,color:'#666'}}>{PASSWORD_HINT}</div>
-                </>
-              )}
-            </div>
             
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
               <h4>Application Name</h4>
