@@ -632,8 +632,13 @@ export default function App(){
   const [mcPage, setMcPage] = useState(1)
   const [mcPageSize, setMcPageSize] = useState(10)
   const [mcVisibleCols, setMcVisibleCols] = useState([])
-  const [editingCollection, setEditingCollection] = useState(null)
 
+  const [editingCollection, setEditingCollection] = useState(null)
+  const [showMcColumnPicker, setShowMcColumnPicker] = useState(false)
+  const [mcPickerLeft, setMcPickerLeft] = useState([])
+  const [mcPickerRight, setMcPickerRight] = useState([])
+  const [mcPickerLeftSelected, setMcPickerLeftSelected] = useState(new Set())
+  const [mcPickerRightSelected, setMcPickerRightSelected] = useState(new Set())
   // Load members when navigating to Members page
   useEffect(()=>{
     if(page==='members') fetchMembers('')
@@ -900,6 +905,61 @@ export default function App(){
     return activeFilters ? rows : rows.slice(0, 10)
   }
 
+  function openMcColumnPicker(){
+    const all = getMcAllColumns()
+    const current = getMcDisplayColumns()
+    const available = all.filter(c=> !current.includes(c))
+    setMcPickerLeft(available)
+    setMcPickerRight(current)
+    setMcPickerLeftSelected(new Set())
+    setMcPickerRightSelected(new Set())
+    setShowMcColumnPicker(true)
+  }
+
+  function moveMcColumnsToRight(){
+    const selected = Array.from(mcPickerLeftSelected)
+    const newLeft = mcPickerLeft.filter(c=> !selected.includes(c))
+    const newRight = [...mcPickerRight, ...selected]
+    setMcPickerLeft(newLeft)
+    setMcPickerRight(newRight)
+    setMcPickerLeftSelected(new Set())
+  }
+
+  function moveMcColumnsToLeft(){
+    const selected = Array.from(mcPickerRightSelected)
+    const newRight = mcPickerRight.filter(c=> !selected.includes(c))
+    const newLeft = [...mcPickerLeft, ...selected]
+    setMcPickerLeft(newLeft)
+    setMcPickerRight(newRight)
+    setMcPickerRightSelected(new Set())
+  }
+
+  function moveMcColumnUp(){
+    const selected = Array.from(mcPickerRightSelected)
+    if(selected.length !== 1) return
+    const col = selected[0]
+    const idx = mcPickerRight.indexOf(col)
+    if(idx <= 0) return
+    const newRight = [...mcPickerRight]
+    [newRight[idx], newRight[idx-1]] = [newRight[idx-1], newRight[idx]]
+    setMcPickerRight(newRight)
+  }
+
+  function moveMcColumnDown(){
+    const selected = Array.from(mcPickerRightSelected)
+    if(selected.length !== 1) return
+    const col = selected[0]
+    const idx = mcPickerRight.indexOf(col)
+    if(idx >= mcPickerRight.length - 1) return
+    const newRight = [...mcPickerRight]
+    [newRight[idx], newRight[idx+1]] = [newRight[idx+1], newRight[idx]]
+    setMcPickerRight(newRight)
+  }
+
+  function saveMcColumns(){
+    setMcVisibleCols(mcPickerRight)
+    setShowMcColumnPicker(false)
+  }
   function escapeHtml(value){
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -1947,33 +2007,150 @@ export default function App(){
                 </thead>
                 <tbody>
                   {(() => {
-                    try{
-                      const rows = getFilteredMembersCollectionsRows()
-                      const total = rows.length
-                      const start = (mcPage-1)*mcPageSize; const end = start + mcPageSize
-                      const pageRows = rows.slice(start, end)
-                      return pageRows.map((r,idx)=> (
-                        <tr key={r && (r.id||idx)}>
-                          {getMcDisplayColumns().map(k=> {
-                            if(k === 'verified') return <td key={k}>{r && r.__verified? 'Yes':'No'}</td>
-                            return <td key={k}>{displayCellValue(k, r)}</td>
-                          })}
-                          <td>
-                            <button onClick={()=>{ setEditingCollection({...r}); }}>Edit</button>
-                          </td>
-                        </tr>
-                      ))
-                    }catch(err){
-                      console.error('Render error in members_collections table', err)
-                      return <tr><td colSpan={ getMcDisplayColumns().length + 1 }>Error rendering collections: {String(err.message||err)}</td></tr>
-                    }
-                  })()}
-                </tbody>
-              </table>
-            </div>
-            <div style={{marginTop:8}}>
               <button onClick={()=> setMcPage(p=> Math.max(1,p-1))} disabled={mcPage<=1}>Prev</button>
+                              <div style={{marginBottom:10,padding:'10px 12px',border:'1px solid #ddd',borderRadius:8,background:'#f8fafc'}}>
+                                <button onClick={openMcColumnPicker} style={{background:'none',border:'none',color:'#0a58ca',textDecoration:'underline',cursor:'pointer',padding:0,fontSize:13,fontWeight:700}}>
+                                  Column Picker ({getMcDisplayColumns().length} visible)
+                                </button>
+                                <span style={{marginLeft:12,fontSize:12,color:'#666'}}>
+                                  Showing: {getMcDisplayColumns().map(labelForColumn).join(', ')}
+                                </span>
+                              </div>
               <span style={{margin:'0 8px'}}>Page {mcPage} / {Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))} ({getFilteredMembersCollectionsRows().length} records)</span>
+                              {/* Column Picker Modal */}
+                              {showMcColumnPicker && (
+                                <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
+                                  <div style={{background:'#fff',borderRadius:8,padding:24,maxWidth:800,width:'90%',maxHeight:'90vh',overflow:'auto',boxShadow:'0 10px 40px rgba(0,0,0,0.3)'}}>
+                                    <h3 style={{marginTop:0,marginBottom:20,fontSize:18,fontWeight:700}}>Column Picker</h3>
+                  
+                                    <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',gap:16,marginBottom:20}}>
+                                      {/* Left side - Available columns */}
+                                      <div>
+                                        <div style={{fontSize:12,fontWeight:700,marginBottom:8,color:'#666'}}>AVAILABLE COLUMNS</div>
+                                        <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:300,maxHeight:400,overflowY:'auto',background:'#fafafa'}}>
+                                          {mcPickerLeft.length === 0 ? (
+                                            <div style={{padding:12,textAlign:'center',color:'#999',fontSize:12}}>No available columns</div>
+                                          ) : (
+                                            <div>
+                                              {mcPickerLeft.map(col => (
+                                                <div
+                                                  key={col}
+                                                  onClick={()=>{
+                                                    const newSelected = new Set(mcPickerLeftSelected)
+                                                    if(newSelected.has(col)) newSelected.delete(col)
+                                                    else newSelected.add(col)
+                                                    setMcPickerLeftSelected(newSelected)
+                                                  }}
+                                                  style={{
+                                                    padding:'10px 12px',
+                                                    borderBottom:'1px solid #e5e5e5',
+                                                    cursor:'pointer',
+                                                    background:mcPickerLeftSelected.has(col) ? '#e3f2fd' : '#fafafa',
+                                                    fontSize:13,
+                                                    userSelect:'none'
+                                                  }}
+                                                >
+                                                  {labelForColumn(col)}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Middle - Move buttons */}
+                                      <div style={{display:'flex',flexDirection:'column',justifyContent:'center',gap:8}}>
+                                        <button
+                                          onClick={moveMcColumnsToRight}
+                                          disabled={mcPickerLeftSelected.size === 0}
+                                          style={{padding:'8px 12px',fontSize:14,cursor:mcPickerLeftSelected.size===0? 'default':'pointer',opacity:mcPickerLeftSelected.size===0?0.5:1,background:'#0a58ca',color:'#fff',border:'none',borderRadius:4,fontWeight:600}}
+                                        >
+                                          ✓ Add →
+                                        </button>
+                                        <button
+                                          onClick={moveMcColumnsToLeft}
+                                          disabled={mcPickerRightSelected.size === 0}
+                                          style={{padding:'8px 12px',fontSize:14,cursor:mcPickerRightSelected.size===0? 'default':'pointer',opacity:mcPickerRightSelected.size===0?0.5:1,background:'#dc3545',color:'#fff',border:'none',borderRadius:4,fontWeight:600}}
+                                        >
+                                          ← Remove
+                                        </button>
+                                      </div>
+
+                                      {/* Right side - Selected columns */}
+                                      <div>
+                                        <div style={{fontSize:12,fontWeight:700,marginBottom:8,color:'#666'}}>SELECTED COLUMNS (drag to reorder)</div>
+                                        <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:300,maxHeight:400,overflowY:'auto',background:'#f0f9ff'}}>
+                                          {mcPickerRight.length === 0 ? (
+                                            <div style={{padding:12,textAlign:'center',color:'#999',fontSize:12}}>No selected columns</div>
+                                          ) : (
+                                            <div>
+                                              {mcPickerRight.map((col, idx) => (
+                                                <div
+                                                  key={col}
+                                                  onClick={()=>{
+                                                    const newSelected = new Set(mcPickerRightSelected)
+                                                    if(newSelected.has(col)) newSelected.delete(col)
+                                                    else newSelected.add(col)
+                                                    setMcPickerRightSelected(newSelected)
+                                                  }}
+                                                  style={{
+                                                    padding:'10px 12px',
+                                                    borderBottom:'1px solid #e5e5e5',
+                                                    cursor:'pointer',
+                                                    background:mcPickerRightSelected.has(col) ? '#bbdefb' : '#f0f9ff',
+                                                    fontSize:13,
+                                                    userSelect:'none',
+                                                    display:'flex',
+                                                    justifyContent:'space-between',
+                                                    alignItems:'center'
+                                                  }}
+                                                >
+                                                  <span>{labelForColumn(col)}</span>
+                                                  <span style={{fontSize:11,color:'#999'}}>{idx + 1}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                      
+                                        {/* Up/Down buttons for ordering */}
+                                        {mcPickerRightSelected.size === 1 && (
+                                          <div style={{marginTop:8,display:'flex',gap:6}}>
+                                            <button
+                                              onClick={moveMcColumnUp}
+                                              style={{flex:1,padding:'6px 8px',fontSize:12,background:'#28a745',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}
+                                            >
+                                              ▲ Move Up
+                                            </button>
+                                            <button
+                                              onClick={moveMcColumnDown}
+                                              style={{flex:1,padding:'6px 8px',fontSize:12,background:'#28a745',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}
+                                            >
+                                              Move Down ▼
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Bottom buttons */}
+                                    <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:20}}>
+                                      <button
+                                        onClick={()=>setShowMcColumnPicker(false)}
+                                        style={{padding:'8px 16px',fontSize:13,background:'#e0e0e0',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        onClick={saveMcColumns}
+                                        style={{padding:'8px 16px',fontSize:13,background:'#0a58ca',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}
+                                      >
+                                        Apply
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
               <button onClick={()=> setMcPage(p=> {
                 const pages = Math.max(1, Math.ceil(getFilteredMembersCollectionsRows().length / mcPageSize))
                 return Math.min(pages, p+1)
