@@ -924,8 +924,8 @@ export default function App(){
       title,
       body,
       style: isError
-        ? { border:'1px solid #f5c2c7', background:'#fff1f2', title:'#842029', body:'#58151c' }
-        : { border:'1px solid #badbcc', background:'#f0fff4', title:'#0f5132', body:'#1f5132' }
+        ? { border:'1px solid #ef4444', background:'#fff5f5', title:'#111827', body:'#111827' }
+        : { border:'1px solid #10b981', background:'#f5fffa', title:'#111827', body:'#111827' }
     }
   }
 
@@ -971,9 +971,9 @@ export default function App(){
           <input placeholder='password' type='password' value={loginPass} onChange={e=>setLoginPass(e.target.value)} />
           <button onClick={doLogin}>Login</button>
           {statusMeta() && (
-            <div style={{marginTop:10,padding:'10px 12px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
-              <div style={{fontWeight:700,fontSize:14,color:statusMeta().style.title,marginBottom:2}}>{statusMeta().title}</div>
-              <div style={{fontSize:14,color:statusMeta().style.body,lineHeight:1.4}}>{statusMeta().body}</div>
+            <div style={{marginTop:10,padding:'12px 14px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
+              <div style={{fontWeight:800,fontSize:15,color:statusMeta().style.title,marginBottom:4,letterSpacing:'0.01em'}}>{statusMeta().title}</div>
+              <div style={{fontSize:15,fontWeight:600,color:statusMeta().style.body,lineHeight:1.45}}>{statusMeta().body}</div>
             </div>
           )}
         </div>
@@ -1023,9 +1023,9 @@ export default function App(){
 
         <main style={{borderTop:'1px solid #eee', paddingTop:12}}>
           {statusMeta() && (
-            <div style={{marginBottom:12,padding:'10px 12px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
-              <div style={{fontWeight:700,fontSize:14,color:statusMeta().style.title,marginBottom:2}}>{statusMeta().title}</div>
-              <div style={{fontSize:14,color:statusMeta().style.body,lineHeight:1.4}}>{statusMeta().body}</div>
+            <div style={{marginBottom:12,padding:'12px 14px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
+              <div style={{fontWeight:800,fontSize:15,color:statusMeta().style.title,marginBottom:4,letterSpacing:'0.01em'}}>{statusMeta().title}</div>
+              <div style={{fontSize:15,fontWeight:600,color:statusMeta().style.body,lineHeight:1.45}}>{statusMeta().body}</div>
             </div>
           )}
         {page==='dashboard' && (
