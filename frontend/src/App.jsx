@@ -625,14 +625,40 @@ export default function App(){
 
   useEffect(()=>{ fetchCodes(); fetchMembersLocal() }, [])
   useEffect(()=>{ if(step===3||step===2) recomputeMappedPreview() }, [step, mapping, fullPreview, selectedChurch, selectedDate, uploaderName])
+  useEffect(()=>{
+    if(user){
+      const preferredName = displayUserName(user) || String(user?.username || '')
+      setUploaderName(preferredName)
+    }
+  }, [user])
 
   // Helper: human-friendly label for a column using `collectionCodes` mapping
+  function collectionCodeMeta(col){
+    if(!col) return null
+    const matches = (collectionCodes || []).filter(c=> c.column_name === col || c.code === col)
+    if(!matches.length) return null
+    const preferred = matches.find(c=> Number(c.church)===Number(currentUserChurchId)) || matches.find(c=> c.church == null) || matches[0]
+    return preferred || null
+  }
+
   function labelForColumn(col){
     if(!col) return '';
-    const found = (collectionCodes||[]).find(c=> c.column_name === col || c.code === col);
-    if(found && found.code) return found.code;
+    const found = collectionCodeMeta(col)
+    if(found){
+      return found.custom_collection_name || found.code || found.column_name || col
+    }
     const human = { s1: 'Sno', s2: 'Date', s3: 'Serial', s4: 'Name' }[col];
     return human || col;
+  }
+
+  function mappedPreviewColumns(){
+    const first = mappedPreview[0]
+    if(!first) return []
+    return Object.keys(first).filter(k=> !['collection_code','church','s2','source'].includes(k))
+  }
+
+  function currentChurchName(){
+    return (churches || []).find(c=> Number(c.id)===Number(selectedChurch || currentUserChurchId))?.name || String(selectedChurch || currentUserChurchId || '-')
   }
 
   // Helper: display value for a table cell; for `collection_code` show the column_name when available
@@ -1991,7 +2017,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
               {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
             </select>
             <label style={{marginLeft:8}}>Uploader name:</label>
-            <input value={uploaderName} onChange={e=>setUploaderName(e.target.value)} />
+            <input value={uploaderName} readOnly disabled style={{opacity:1, color:'#111827', background:'#f3f4f6', fontWeight:600}} />
           </div>
           <div style={{marginTop:8}}>
             <button onClick={uploadFile}>Upload & Inspect</button>
@@ -2047,11 +2073,16 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       {step===3 && (
         <div>
           <h4>Mapped preview ({mappedPreview.length} rows)</h4>
-          <div style={{maxHeight:400, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd'}}>
+          <div style={{marginBottom:10, display:'flex', gap:12, flexWrap:'wrap', alignItems:'center', padding:'10px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#f8fafc'}}>
+            <div><strong>Church:</strong> <span style={{color:'#111827', fontWeight:600}}>{currentChurchName()}</span></div>
+            <div><strong>Tarehe:</strong> <span style={{color:'#111827', fontWeight:600}}>{selectedDate || '-'}</span></div>
+            <div><strong>Source:</strong> <span style={{color:'#111827', fontWeight:600}}>{uploaderName || '-'}</span></div>
+          </div>
+          <div style={{maxHeight:420, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:8}}>
             <table style={{width:'100%', minWidth:'max-content', borderCollapse:'separate', borderSpacing:0}}>
-              <thead><tr>{mappedPreview[0] ? Object.keys(mappedPreview[0]).map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>{labelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
+              <thead><tr>{mappedPreview[0] ? mappedPreviewColumns().map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd', whiteSpace:'nowrap'}}>{labelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
               <tbody>{mappedPreview.map((r,idx)=> (
-                <tr key={idx}>{Object.keys(r).map(k=> <td key={k}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} /></td>)}</tr>
+                <tr key={idx}>{mappedPreviewColumns().map(k=> <td key={k}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} style={{minWidth:160}} /></td>)}</tr>
               ))}</tbody>
             </table>
           </div>
