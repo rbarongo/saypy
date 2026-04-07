@@ -781,9 +781,13 @@ export default function App(){
       }
       // attach helper metadata per row (verified flag and suggestions)
       const enriched = (Array.isArray(data)? data : []).map(r=> ({...r, __verified: false, __suggestions: []}))
-      const scoped = (currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId)))
-        ? enriched
-        : enriched.filter(r => Number(r?.church) === Number(currentUserChurchId))
+      const scoped = enriched.filter(r=>{
+        if(currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId))) return true
+        if(Number(r?.church) === Number(currentUserChurchId)) return true
+        const currentChurchName = String((churches || []).find(c=> Number(c.id)===Number(currentUserChurchId))?.name || '').trim().toLowerCase()
+        const rowChurchText = String(r?.church ?? '').trim().toLowerCase()
+        return !!currentChurchName && rowChurchText === currentChurchName
+      })
       setMembersCollections(scoped)
       if(!scoped.length){
         setStatus('No collection rows found')
@@ -812,11 +816,17 @@ export default function App(){
     return cols.length ? cols : all
   }
 
+  function rowMatchesCurrentChurch(row){
+    if(currentUserChurchId === null || currentUserChurchId === undefined || Number.isNaN(Number(currentUserChurchId))) return true
+    if(Number(row?.church) === Number(currentUserChurchId)) return true
+    const currentChurchName = String((churches || []).find(c=> Number(c.id)===Number(currentUserChurchId))?.name || '').trim().toLowerCase()
+    const rowChurchText = String(row?.church ?? '').trim().toLowerCase()
+    return !!currentChurchName && rowChurchText === currentChurchName
+  }
+
   function getFilteredMembersCollectionsRows(){
     let rows = Array.isArray(membersCollections) ? membersCollections : []
-    if(currentUserChurchId !== null && currentUserChurchId !== undefined && !Number.isNaN(Number(currentUserChurchId))){
-      rows = rows.filter(r => Number(r?.church) === Number(currentUserChurchId))
-    }
+    rows = rows.filter(r => rowMatchesCurrentChurch(r))
     if(mcApplied.code){
       rows = rows.filter(r=> {
         try{ return r.collection_code === mcApplied.code || r.collection_code === (collectionCodes.find(c=>c.column_name===mcApplied.code)?.code) }
