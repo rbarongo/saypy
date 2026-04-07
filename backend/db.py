@@ -379,9 +379,9 @@ members = Table(
     Column('GROUP_LEADER_ID', Integer, nullable=True),
     Column('DEFAULT_GROUP_LEADER_ID', Integer, nullable=True),
     Column('STATUS', String(100), nullable=True),
-    Column('TRANSFER_TO_CHURCH', Integer, nullable=True),
-    Column('TRANSFER_DATE', DateTime, nullable=True),
-    Column('STATUS_UPDATED_AT', DateTime, nullable=True),
+    Column('transfer_to_church', Integer, nullable=True),
+    Column('transfer_date', DateTime, nullable=True),
+    Column('status_updated_at', DateTime, nullable=True),
     Column('PHONE', String(100), nullable=True),
     Column('PHONE2', String(100), nullable=True),
     Column('EMAIL', String(320), nullable=True),
@@ -1536,18 +1536,21 @@ def ensure_members_schema():
     inspector = inspect(engine)
     if 'members' not in inspector.get_table_names():
         return
-    existing = {c['name'] for c in inspector.get_columns('members')}
+    existing = {str(c['name']).strip().lower() for c in inspector.get_columns('members')}
     expected = {
-        'STATUS': 'TEXT',
-        'TRANSFER_TO_CHURCH': 'INTEGER',
-        'TRANSFER_DATE': 'DATETIME',
-        'STATUS_UPDATED_AT': 'DATETIME',
+        'status': 'TEXT',
+        'transfer_to_church': 'INTEGER',
+        'transfer_date': 'DATETIME',
+        'status_updated_at': 'DATETIME',
     }
     missing = [k for k in expected.keys() if k not in existing]
 
     for col in missing:
         col_type = expected[col]
-        sql_type = 'TEXT' if (DB_ENGINE in ("sqlite", "sqlite3") and col_type.startswith('VARCHAR')) else col_type
+        if DB_ENGINE in ("sqlite", "sqlite3"):
+            sql_type = 'TEXT' if col_type.startswith('VARCHAR') else col_type
+        else:
+            sql_type = 'TIMESTAMP' if col_type == 'DATETIME' else col_type
         stmt = f'ALTER TABLE members ADD COLUMN {col} {sql_type}'
         with engine.connect() as conn:
             conn.execute(text(stmt))
@@ -1625,9 +1628,9 @@ def insert_member(
         GROUP_LEADER_ID=GROUP_LEADER_ID,
         DEFAULT_GROUP_LEADER_ID=DEFAULT_GROUP_LEADER_ID,
         STATUS=STATUS,
-        TRANSFER_TO_CHURCH=TRANSFER_TO_CHURCH,
-        TRANSFER_DATE=TRANSFER_DATE,
-        STATUS_UPDATED_AT=STATUS_UPDATED_AT,
+        transfer_to_church=TRANSFER_TO_CHURCH,
+        transfer_date=TRANSFER_DATE,
+        status_updated_at=STATUS_UPDATED_AT,
         PHONE=_normalize_phone_text(PHONE),
         PHONE2=_normalize_phone_text(PHONE2),
         EMAIL=EMAIL,

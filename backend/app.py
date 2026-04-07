@@ -31,6 +31,7 @@ from .db import (
     delete_role_policy,
     import_collection_codes_from_workbook,
     ensure_global_config_schema,
+    ensure_members_schema,
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import inspect, text
@@ -104,6 +105,22 @@ def _normalize_phone_text(v: Optional[str]) -> Optional[str]:
     if s.endswith('.0'):
         s = s[:-2]
     return s
+
+
+def _normalize_member_transfer_fields(status_value: Optional[str], transfer_to_church: Optional[int], transfer_date: Optional[datetime]):
+    """Apply status-specific transfer rules.
+
+    - transfer_to_church must be provided when status is 'inactive by transfer'
+    - transfer_to_church/transfer_date are cleared for other statuses
+    """
+    if status_value == MEMBER_STATUS_INACTIVE_TRANSFER:
+        if transfer_to_church is None:
+            raise HTTPException(
+                status_code=422,
+                detail='TRANSFER_TO_CHURCH is required when member status is "inactive by transfer"',
+            )
+        return transfer_to_church, transfer_date
+    return None, None
 
 
 def _normalize_user_context(user: Optional[dict]) -> Optional[dict]:
@@ -547,9 +564,15 @@ class MemberCollectionIn(BaseModel):
 def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     """Create a member record and return its id."""
     _require_auth_right(auth, 'can_manage_members', context='member creation')
+    ensure_members_schema()
     actor_church = _auth_context_church(auth)
     effective_church = _enforce_church_scope(payload.church, actor_church, context='member creation')
     normalized_status = _normalize_member_status(payload.STATUS)
+    transfer_to_church, transfer_date = _normalize_member_transfer_fields(
+        normalized_status,
+        payload.TRANSFER_TO_CHURCH,
+        payload.TRANSFER_DATE,
+    )
     pk = insert_member(
         sno=payload.sno,
         MEMBER_NAME=payload.MEMBER_NAME,
@@ -564,8 +587,8 @@ def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_use
         GROUP_LEADER_ID=payload.GROUP_LEADER_ID,
         DEFAULT_GROUP_LEADER_ID=payload.DEFAULT_GROUP_LEADER_ID,
         STATUS=normalized_status,
-        TRANSFER_TO_CHURCH=payload.TRANSFER_TO_CHURCH,
-        TRANSFER_DATE=payload.TRANSFER_DATE,
+        TRANSFER_TO_CHURCH=transfer_to_church,
+        TRANSFER_DATE=transfer_date,
         STATUS_UPDATED_AT=datetime.utcnow() if normalized_status else None,
         PHONE=_normalize_phone_text(payload.PHONE),
         PHONE2=_normalize_phone_text(payload.PHONE2),
@@ -1576,6 +1599,7 @@ def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_o
 def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(require_api_key_or_user)):
     try:
         _require_auth_right(auth, 'can_manage_members', context='member update')
+        ensure_members_schema()
         actor_church = _auth_context_church(auth)
         if actor_church is not None:
             with engine.connect() as conn:
@@ -1585,6 +1609,11 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
             _enforce_church_scope(existing[0], actor_church, context='this member record')
         effective_church = _enforce_church_scope(payload.church, actor_church, context='member update')
         normalized_status = _normalize_member_status(payload.STATUS)
+        transfer_to_church, transfer_date = _normalize_member_transfer_fields(
+            normalized_status,
+            payload.TRANSFER_TO_CHURCH,
+            payload.TRANSFER_DATE,
+        )
 
         with engine.connect() as conn:
             conn.execute(
@@ -1604,9 +1633,9 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
                         "GROUP_LEADER_ID"=:gleader,
                         "DEFAULT_GROUP_LEADER_ID"=:dgleader,
                         "STATUS"=:status,
-                        "TRANSFER_TO_CHURCH"=:transfer_to_church,
-                        "TRANSFER_DATE"=:transfer_date,
-                        "STATUS_UPDATED_AT"=:status_updated_at,
+                        transfer_to_church=:transfer_to_church,
+                        transfer_date=:transfer_date,
+                        status_updated_at=:status_updated_at,
                         "PHONE"=:phone,
                         "PHONE2"=:phone2,
                         "EMAIL"=:email,
@@ -1630,8 +1659,8 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
                     "gleader": payload.GROUP_LEADER_ID,
                     "dgleader": payload.DEFAULT_GROUP_LEADER_ID,
                     "status": normalized_status,
-                    "transfer_to_church": payload.TRANSFER_TO_CHURCH,
-                    "transfer_date": payload.TRANSFER_DATE,
+                    "transfer_to_church": transfer_to_church,
+                    "transfer_date": transfer_date,
                     "status_updated_at": datetime.utcnow() if normalized_status else None,
                     "phone": _normalize_phone_text(payload.PHONE),
                     "phone2": _normalize_phone_text(payload.PHONE2),

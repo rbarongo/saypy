@@ -1036,6 +1036,9 @@ export default function App(){
       TRANSFER_TO_CHURCH: 'Transfer To Church',
       TRANSFER_DATE: 'Transfer Date',
       STATUS_UPDATED_AT: 'Status Updated',
+      transfer_to_church: 'Transfer To Church',
+      transfer_date: 'Transfer Date',
+      status_updated_at: 'Status Updated',
     }
     return map[col] || col
   }
@@ -2101,7 +2104,7 @@ export default function App(){
                         </select>
                       )
                     }
-                    if(key==='TRANSFER_TO_CHURCH'){
+                    if(key==='TRANSFER_TO_CHURCH' || key==='transfer_to_church'){
                       return (
                         <select key={key} value={val||''} onChange={e=>{
                           const selected = e.target.value
@@ -2113,7 +2116,7 @@ export default function App(){
                         </select>
                       )
                     }
-                    if(key==='TRANSFER_DATE'){
+                    if(key==='TRANSFER_DATE' || key==='transfer_date'){
                       const v = val? new Date(val).toISOString().slice(0,10) : ''
                       return <input key={key} type='date' value={v} onChange={e=> setMemberForm(prev=>({...prev, [key]: e.target.value || null}))} />
                     }
