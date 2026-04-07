@@ -1571,26 +1571,42 @@ def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_o
             {'can_manage_members', 'can_manage_collections', 'can_manage_members_collections'},
             context='members listing'
         )
-        df = pd.read_sql_table('members', con=engine)
         actor_church = _auth_context_church(auth)
-        if actor_church is not None and 'church' in df.columns:
-            df = df[df['church'] == actor_church]
+        sql = 'SELECT * FROM members WHERE 1=1'
+        params = {}
+
+        if actor_church is not None:
+            sql += ' AND church = :church'
+            params['church'] = actor_church
+
         if q:
-            # Search MEMBER_NAME text or exact MEMBER_ID when numeric
+            q_text = str(q).strip()
+            q_like = f"%{q_text.lower()}%"
             try:
-                qnum = int(q)
+                qnum = int(q_text)
             except Exception:
                 qnum = None
-            mask = df['MEMBER_NAME'].astype(str).str.contains(q, case=False, na=False)
             if qnum is not None:
-                mask = mask | (df['MEMBER_ID'] == qnum)
-            df = df[mask]
-        for ph_col in ('PHONE', 'PHONE2'):
-            if ph_col in df.columns:
-                df[ph_col] = df[ph_col].apply(_normalize_phone_text)
-        rows = df.to_dict(orient='records')
+                sql += " AND (LOWER(COALESCE(\"MEMBER_NAME\", '')) LIKE :q_like OR CAST(\"MEMBER_ID\" AS TEXT) = :q_exact)"
+                params['q_exact'] = str(qnum)
+            else:
+                sql += " AND LOWER(COALESCE(\"MEMBER_NAME\", '')) LIKE :q_like"
+            params['q_like'] = q_like
+
+        sql += ' ORDER BY sno ASC, id ASC'
+
+        with engine.connect() as conn:
+            res = conn.execute(text(sql), params)
+            rows = [dict(r._mapping) for r in res.fetchall()]
+
+        for r in rows:
+            r['PHONE'] = _normalize_phone_text(r.get('PHONE'))
+            r['PHONE2'] = _normalize_phone_text(r.get('PHONE2'))
+
         out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
         return out
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1615,36 +1631,47 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
             payload.TRANSFER_DATE,
         )
 
+        inspector = inspect(engine)
+        member_cols = {str(c.get('name') or '').strip() for c in inspector.get_columns('members')}
+        member_cols_lc = {c.lower() for c in member_cols}
+
+        transfer_to_col = 'transfer_to_church' if 'transfer_to_church' in member_cols_lc else ('"TRANSFER_TO_CHURCH"' if 'TRANSFER_TO_CHURCH' in member_cols else None)
+        transfer_date_col = 'transfer_date' if 'transfer_date' in member_cols_lc else ('"TRANSFER_DATE"' if 'TRANSFER_DATE' in member_cols else None)
+        status_updated_col = 'status_updated_at' if 'status_updated_at' in member_cols_lc else ('"STATUS_UPDATED_AT"' if 'STATUS_UPDATED_AT' in member_cols else None)
+
+        set_parts = [
+            'sno=:sno',
+            '"MEMBER_NAME"=:mn',
+            '"MEMBER_ID"=:mid',
+            '"FAMILY_ID"=:fid',
+            '"DEFAULT_FAMILY_ID"=:dfid',
+            '"OFFICIAL_MEMBER_ID"=:omid',
+            'pledge=:pledge',
+            '"GROUP_NAME"=:gname',
+            '"GROUP_ALIAS"=:galias',
+            '"DEFAULT_GROUP_ALIAS"=:dgalias',
+            '"GROUP_LEADER_ID"=:gleader',
+            '"DEFAULT_GROUP_LEADER_ID"=:dgleader',
+            '"STATUS"=:status',
+            '"PHONE"=:phone',
+            '"PHONE2"=:phone2',
+            '"EMAIL"=:email',
+            '"RESIDENCE"=:res',
+            'church=:church',
+        ]
+
+        if transfer_to_col:
+            set_parts.append(f'{transfer_to_col}=:transfer_to_church')
+        if transfer_date_col:
+            set_parts.append(f'{transfer_date_col}=:transfer_date')
+        if status_updated_col:
+            set_parts.append(f'{status_updated_col}=:status_updated_at')
+
+        update_sql = f"UPDATE members SET {', '.join(set_parts)} WHERE id=:id"
+
         with engine.connect() as conn:
             conn.execute(
-                text(
-                    """
-                    UPDATE members SET
-                        sno=:sno,
-                        "MEMBER_NAME"=:mn,
-                        "MEMBER_ID"=:mid,
-                        "FAMILY_ID"=:fid,
-                        "DEFAULT_FAMILY_ID"=:dfid,
-                        "OFFICIAL_MEMBER_ID"=:omid,
-                        pledge=:pledge,
-                        "GROUP_NAME"=:gname,
-                        "GROUP_ALIAS"=:galias,
-                        "DEFAULT_GROUP_ALIAS"=:dgalias,
-                        "GROUP_LEADER_ID"=:gleader,
-                        "DEFAULT_GROUP_LEADER_ID"=:dgleader,
-                        "STATUS"=:status,
-                        transfer_to_church=:transfer_to_church,
-                        transfer_date=:transfer_date,
-                        status_updated_at=:status_updated_at,
-                        "PHONE"=:phone,
-                        "PHONE2"=:phone2,
-                        "EMAIL"=:email,
-                        "RESIDENCE"=:res
-                            ,
-                            church=:church
-                    WHERE id=:id
-                    """
-                ),
+                text(update_sql),
                 {
                     "sno": payload.sno,
                     "mn": payload.MEMBER_NAME,

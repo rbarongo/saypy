@@ -582,6 +582,8 @@ def create_tables():
         with engine.begin() as conn:
             conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_id_unique ON members(id)'))
             conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_members_sno_unique ON members(sno)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_members_church ON members(church)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_members_member_id ON members("MEMBER_ID")'))
     except Exception:
         pass
 
@@ -1558,6 +1560,14 @@ def ensure_members_schema():
                 conn.commit()
             except Exception:
                 pass
+
+    # Performance indexes for members menu loading/filtering
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_members_church ON members(church)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_members_member_id ON members("MEMBER_ID")'))
+    except Exception:
+        pass
 
 
 def insert_member(
