@@ -753,6 +753,28 @@ def ensure_collection_codes_schema():
             except Exception:
                 pass
 
+    # Legacy databases may still have a unique constraint/index on column_name
+    # from the old global-only model. Drop it so per-church rows can coexist.
+    # Postgres path: constraint name commonly auto-created as *_key.
+    if DB_ENGINE not in ("sqlite", "sqlite3"):
+        with engine.connect() as conn:
+            try:
+                conn.execute(text('ALTER TABLE collection_codes DROP CONSTRAINT IF EXISTS collection_codes_column_name_key'))
+            except Exception:
+                pass
+            try:
+                conn.execute(text('DROP INDEX IF EXISTS collection_codes_column_name_key'))
+            except Exception:
+                pass
+            try:
+                conn.execute(text('DROP INDEX IF EXISTS ix_collection_codes_column_name'))
+            except Exception:
+                pass
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
 
 def seed_role_policies():
     """Seed built-in role policies if table is empty."""

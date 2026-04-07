@@ -164,7 +164,7 @@ export default function App(){
   const [newCodeLabel, setNewCodeLabel] = useState('')
   const [editingCodeId, setEditingCodeId] = useState(null)
   const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:''})
-  const [showCollectionCodesPanel, setShowCollectionCodesPanel] = useState(false)
+  const [showCollectionCodesPanel, setShowCollectionCodesPanel] = useState(true)
   const [collectionCodesMaxRows, setCollectionCodesMaxRows] = useState(30)
   const [editingRole, setEditingRole] = useState(null)
   const [newRole, setNewRole] = useState({
