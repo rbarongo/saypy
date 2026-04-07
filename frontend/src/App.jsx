@@ -1842,6 +1842,33 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
     showPrompt('error', `Restricted information: you cannot access ${context} for another church`)
   }
 
+  function localCollectionCodeMeta(col){
+    if(!col) return null
+    const matches = (collectionCodes || []).filter(c=> c.column_name === col || c.code === col)
+    if(!matches.length) return null
+    const preferred = matches.find(c=> Number(c.church)===Number(scopedChurchId)) || matches.find(c=> c.church == null) || matches[0]
+    return preferred || null
+  }
+
+  function localLabelForColumn(col){
+    if(!col) return ''
+    const found = localCollectionCodeMeta(col)
+    if(found) return found.custom_collection_name || found.code || found.column_name || col
+    return labelForColumn(col)
+  }
+
+  function mappedPreviewColumnsLocal(){
+    const first = mappedPreview[0]
+    if(!first) return []
+    return Object.keys(first).filter(k=> !['collection_code','church','s2','source'].includes(k))
+  }
+
+  function currentChurchNameLocal(){
+    return (churches || []).find(c=> Number(c.id)===Number(selectedChurch || scopedChurchId))?.name || String(selectedChurch || scopedChurchId || '-')
+  }
+
+  const visibleChurches = (churches || []).filter(c=> canAccessChurch(c.id))
+
   function showPrompt(level, message){
     setCopiedPrompt(false)
     setPromptState({ open: true, level: level || 'info', message: String(message || '') })
@@ -2014,7 +2041,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
               setSelectedChurch(nextChurch)
             }}>
               <option value=''>-- select --</option>
-              {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
+              {visibleChurches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <label style={{marginLeft:8}}>Uploader name:</label>
             <input value={uploaderName} readOnly disabled style={{opacity:1, color:'#111827', background:'#f3f4f6', fontWeight:600}} />
@@ -2036,10 +2063,10 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
               setSelectedChurch(nextChurch); recomputeMappedPreview()
             }}>
               <option value=''>-- select --</option>
-              {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
+              {visibleChurches.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <label style={{marginLeft:8}}>Uploader name:</label>
-            <input value={uploaderName} onChange={e=>{ setUploaderName(e.target.value); recomputeMappedPreview() }} />
+            <input value={uploaderName} readOnly disabled style={{opacity:1, color:'#111827', background:'#f3f4f6', fontWeight:600}} />
           </div>
               <div style={{marginTop:8, maxHeight: 380, overflow: 'auto', border: '1px solid #ddd'}}>
                 <table border={1} cellPadding={6} style={{borderCollapse:'collapse', minWidth:'max-content'}}>
@@ -2074,15 +2101,15 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         <div>
           <h4>Mapped preview ({mappedPreview.length} rows)</h4>
           <div style={{marginBottom:10, display:'flex', gap:12, flexWrap:'wrap', alignItems:'center', padding:'10px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#f8fafc'}}>
-            <div><strong>Church:</strong> <span style={{color:'#111827', fontWeight:600}}>{currentChurchName()}</span></div>
+            <div><strong>Church:</strong> <span style={{color:'#111827', fontWeight:600}}>{currentChurchNameLocal()}</span></div>
             <div><strong>Tarehe:</strong> <span style={{color:'#111827', fontWeight:600}}>{selectedDate || '-'}</span></div>
             <div><strong>Source:</strong> <span style={{color:'#111827', fontWeight:600}}>{uploaderName || '-'}</span></div>
           </div>
           <div style={{maxHeight:420, overflowX:'auto', overflowY:'auto', border:'1px solid #ddd', borderRadius:8}}>
             <table style={{width:'100%', minWidth:'max-content', borderCollapse:'separate', borderSpacing:0}}>
-              <thead><tr>{mappedPreview[0] ? mappedPreviewColumns().map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd', whiteSpace:'nowrap'}}>{labelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
+              <thead><tr>{mappedPreview[0] ? mappedPreviewColumnsLocal().map(k=> <th key={k} style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd', whiteSpace:'nowrap'}}>{localLabelForColumn(k)}</th>) : <th style={{position:'sticky', top:0, background:'#fff', zIndex:2, borderBottom:'1px solid #ddd'}}>No rows</th>}</tr></thead>
               <tbody>{mappedPreview.map((r,idx)=> (
-                <tr key={idx}>{mappedPreviewColumns().map(k=> <td key={k}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} style={{minWidth:160}} /></td>)}</tr>
+                <tr key={idx}>{mappedPreviewColumnsLocal().map(k=> <td key={k}><input value={r[k]||''} onChange={e=>{ const v=e.target.value; setMappedPreview(prev=>{ const nxt=[...prev]; nxt[idx] = {...nxt[idx], [k]: v}; return nxt }) }} style={{minWidth:160}} /></td>)}</tr>
               ))}</tbody>
             </table>
           </div>
