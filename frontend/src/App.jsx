@@ -913,6 +913,22 @@ export default function App(){
     return String(u?.username || '')
   }
 
+  function statusMeta(){
+    const raw = String(status || '').trim()
+    if(!raw) return null
+    const lower = raw.toLowerCase()
+    const isError = lower.includes('failed') || lower.includes('error') || lower.includes('not authorized')
+    const title = isError ? 'Error' : 'Success'
+    const body = raw.includes(':') ? raw.split(':').slice(1).join(':').trim() || raw : raw
+    return {
+      title,
+      body,
+      style: isError
+        ? { border:'1px solid #f5c2c7', background:'#fff1f2', title:'#842029', body:'#58151c' }
+        : { border:'1px solid #badbcc', background:'#f0fff4', title:'#0f5132', body:'#1f5132' }
+    }
+  }
+
   const filteredUsers = (usersList || []).filter((u)=>{
     const q = String(usersSearchText || '').trim().toLowerCase()
     if(!q) return true
@@ -954,7 +970,12 @@ export default function App(){
           <input placeholder='username' value={loginUser} onChange={e=>setLoginUser(e.target.value)} />
           <input placeholder='password' type='password' value={loginPass} onChange={e=>setLoginPass(e.target.value)} />
           <button onClick={doLogin}>Login</button>
-          <div style={{marginTop:8,color:'#666'}}>{status}</div>
+          {statusMeta() && (
+            <div style={{marginTop:10,padding:'10px 12px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
+              <div style={{fontWeight:700,fontSize:14,color:statusMeta().style.title,marginBottom:2}}>{statusMeta().title}</div>
+              <div style={{fontSize:14,color:statusMeta().style.body,lineHeight:1.4}}>{statusMeta().body}</div>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -1001,7 +1022,12 @@ export default function App(){
         </aside>
 
         <main style={{borderTop:'1px solid #eee', paddingTop:12}}>
-          <div style={{marginBottom:12,color:'#666'}}>{status}</div>
+          {statusMeta() && (
+            <div style={{marginBottom:12,padding:'10px 12px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
+              <div style={{fontWeight:700,fontSize:14,color:statusMeta().style.title,marginBottom:2}}>{statusMeta().title}</div>
+              <div style={{fontSize:14,color:statusMeta().style.body,lineHeight:1.4}}>{statusMeta().body}</div>
+            </div>
+          )}
         {page==='dashboard' && (
           <div>
             <h3>Dashboard</h3>
@@ -1336,7 +1362,7 @@ export default function App(){
                   ? 'View existing church collection codes, edit them, or add more for your church.' 
                   : 'View existing church collection codes.'}
               </p>
-              <p style={{fontSize:12,color:'#666'}}>These codes apply only to your church. Global codes are shared across all churches. By default, every church gets collection codes from Collection_Codes.xlsx.</p>
+              <p style={{fontSize:12,color:'#666'}}>These codes apply only to your church. Global codes are shared across all churches.</p>
               {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,borderRadius:6}}>A church assignment is required to manage collection codes.</div>}
 
               <div style={{marginBottom:12}}>
