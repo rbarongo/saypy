@@ -43,6 +43,27 @@ select{color:#eef6ff;background:#0e1a2f}
 select option{background:#ffffff;color:#0b1220}
 select option:disabled{background:#f2f4f7;color:#7b8794}
 
+/* Keep calendar icon visible in all date pickers across themes/browsers */
+input[type="date"]{
+  color-scheme: light;
+  padding-right: 34px;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator{
+  opacity: 1;
+  cursor: pointer;
+  filter: invert(0) brightness(0.35);
+}
+
+input[type="date"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+input[type="date"]::-webkit-datetime-edit-text,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-year-field{
+  color: inherit;
+}
+
 button.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#052426;border:none;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:700}
 button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:6px 10px;border-radius:8px}
 

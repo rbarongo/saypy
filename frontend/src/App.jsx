@@ -918,42 +918,50 @@ export default function App(){
 
   function moveMcColumnsToRight(){
     const selected = Array.from(mcPickerLeftSelected)
-    const newLeft = mcPickerLeft.filter(c=> !selected.includes(c))
-    const newRight = [...mcPickerRight, ...selected]
-    setMcPickerLeft(newLeft)
-    setMcPickerRight(newRight)
+    if(!selected.length) return
+    const nextLeft = mcPickerLeft.filter(c=> !selected.includes(c))
+    const nextRight = [...mcPickerRight, ...selected.filter(c=> !mcPickerRight.includes(c))]
+    setMcPickerLeft(nextLeft)
+    setMcPickerRight(nextRight)
     setMcPickerLeftSelected(new Set())
   }
 
   function moveMcColumnsToLeft(){
     const selected = Array.from(mcPickerRightSelected)
-    const newRight = mcPickerRight.filter(c=> !selected.includes(c))
-    const newLeft = [...mcPickerLeft, ...selected]
-    setMcPickerLeft(newLeft)
-    setMcPickerRight(newRight)
+    if(!selected.length) return
+    const nextRight = mcPickerRight.filter(c=> !selected.includes(c))
+    const nextLeft = [...mcPickerLeft, ...selected.filter(c=> !mcPickerLeft.includes(c))]
+    setMcPickerLeft(nextLeft)
+    setMcPickerRight(nextRight)
     setMcPickerRightSelected(new Set())
   }
 
   function moveMcColumnUp(){
-    const selected = Array.from(mcPickerRightSelected)
-    if(selected.length !== 1) return
-    const col = selected[0]
-    const idx = mcPickerRight.indexOf(col)
+    const selectedRight = Array.from(mcPickerRightSelected)
+    if(selectedRight.length !== 1) return
+    const col = selectedRight[0]
+    const idx = mcPickerRight.findIndex(c => c === col)
     if(idx <= 0) return
-    const newRight = [...mcPickerRight]
-    [newRight[idx], newRight[idx-1]] = [newRight[idx-1], newRight[idx]]
-    setMcPickerRight(newRight)
+    const nextRight = [...mcPickerRight]
+    const swap = nextRight[idx - 1]
+    nextRight[idx - 1] = nextRight[idx]
+    nextRight[idx] = swap
+    setMcPickerRight(nextRight)
+    setMcPickerRightSelected(new Set([col]))
   }
 
   function moveMcColumnDown(){
-    const selected = Array.from(mcPickerRightSelected)
-    if(selected.length !== 1) return
-    const col = selected[0]
-    const idx = mcPickerRight.indexOf(col)
+    const selectedRight = Array.from(mcPickerRightSelected)
+    if(selectedRight.length !== 1) return
+    const col = selectedRight[0]
+    const idx = mcPickerRight.findIndex(c => c === col)
     if(idx >= mcPickerRight.length - 1) return
-    const newRight = [...mcPickerRight]
-    [newRight[idx], newRight[idx+1]] = [newRight[idx+1], newRight[idx]]
-    setMcPickerRight(newRight)
+    const nextRight = [...mcPickerRight]
+    const swap = nextRight[idx + 1]
+    nextRight[idx + 1] = nextRight[idx]
+    nextRight[idx] = swap
+    setMcPickerRight(nextRight)
+    setMcPickerRightSelected(new Set([col]))
   }
 
   function saveMcColumns(){
