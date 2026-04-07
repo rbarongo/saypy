@@ -726,9 +726,29 @@ export default function App(){
     return (churches || []).find(c=> Number(c.id)===Number(selectedChurch || currentUserChurchId))?.name || String(selectedChurch || currentUserChurchId || '-')
   }
 
+  // Helper: format date to DD-MON-YYYY format (e.g., 26-Apr-2026)
+  function formatDateDisplay(dateStr){
+    if(!dateStr) return '';
+    try{
+      const d = new Date(dateStr);
+      if(isNaN(d.getTime())) return String(dateStr);
+      const day = String(d.getDate()).padStart(2, '0');
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const month = monthNames[d.getMonth()];
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    }catch(e){
+      return String(dateStr);
+    }
+  }
+
   // Helper: display value for a table cell; for `collection_code` show the column_name when available
   function displayCellValue(k, row){
     if(!row) return '';
+    if(k === 's2'){
+      // Format date field to DD-MON-YYYY
+      return formatDateDisplay(row.s2);
+    }
     if(k === 'collection_code'){
       const raw = row.collection_code;
       const found = (collectionCodes||[]).find(c=> c.column_name === raw || c.code === raw);
@@ -807,7 +827,11 @@ export default function App(){
         const keys = Object.keys(enriched[0]).filter(k=> k !== 'added_at' && !k.startsWith('__'))
         if(!keys.includes('verified')) keys.push('verified')
         setMembersCollectionsFields(keys)
-        if(!mcVisibleCols.length) setMcVisibleCols(keys)
+        // By default, hide id, church, and collection_code; show all others
+        if(!mcVisibleCols.length){
+          const defaultVisible = keys.filter(k=> !['id','church','collection_code'].includes(k))
+          setMcVisibleCols(defaultVisible.length ? defaultVisible : keys)
+        }
       }
       return true
     }catch(e){ setStatus('Failed to load collections: '+e.message); setMembersCollections([]); return false }
