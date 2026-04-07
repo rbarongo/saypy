@@ -1301,7 +1301,7 @@ export default function App(){
         {page==='settings' && (
           <div>
             <h3>Settings</h3>
-            {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,marginBottom:12,borderRadius:6}}>⚠️ You do not have a church assigned. Only local church admins can access settings.</div>}
+            {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:'12px 14px',marginBottom:12,borderRadius:6,border:'1px solid #f59e0b',color:'#7c2d12',fontSize:15,fontWeight:700,lineHeight:1.45}}>⚠️ You do not have a church assigned. Only local church admins can access settings.</div>}
 
             {String(user?.role || '').toLowerCase() === 'system_admin' && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
