@@ -128,6 +128,10 @@ def insert_dataframe(df: pd.DataFrame, table_name: str = "members_collection") -
         rows = df.to_dict(orient='records') if df is not None else []
         rows = normalize_members_collection_rows(rows, fill_missing_s3=True, recompute_s1=True)
         df = pd.DataFrame(rows)
+    if tn == "members" and df is not None and not df.empty:
+        for col in ('PHONE', 'PHONE2'):
+            if col in df.columns:
+                df[col] = df[col].apply(_normalize_phone_text)
     # Use pandas to_sql which works with SQLAlchemy engines for both sqlite and postgres
     df.to_sql(table_name, engine, if_exists="append", index=False)
 
@@ -142,6 +146,17 @@ def _coerce_int(v) -> Optional[int]:
         return int(float(s))
     except Exception:
         return None
+
+
+def _normalize_phone_text(v) -> Optional[str]:
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s == "" or s.lower() in {"nan", "none", "null"}:
+        return None
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
 
 
 def _coerce_s1_text(v) -> Optional[str]:
@@ -1613,8 +1628,8 @@ def insert_member(
         TRANSFER_TO_CHURCH=TRANSFER_TO_CHURCH,
         TRANSFER_DATE=TRANSFER_DATE,
         STATUS_UPDATED_AT=STATUS_UPDATED_AT,
-        PHONE=PHONE,
-        PHONE2=PHONE2,
+        PHONE=_normalize_phone_text(PHONE),
+        PHONE2=_normalize_phone_text(PHONE2),
         EMAIL=EMAIL,
         RESIDENCE=RESIDENCE,
         church=church,

@@ -95,6 +95,17 @@ def _normalize_member_status(value: Optional[str]) -> Optional[str]:
     return normalized
 
 
+def _normalize_phone_text(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s == '' or s.lower() in {'nan', 'none', 'null'}:
+        return None
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
+
+
 def _normalize_user_context(user: Optional[dict]) -> Optional[dict]:
     if not isinstance(user, dict):
         return user
@@ -556,8 +567,8 @@ def create_member(payload: MemberIn, auth: dict = Depends(require_api_key_or_use
         TRANSFER_TO_CHURCH=payload.TRANSFER_TO_CHURCH,
         TRANSFER_DATE=payload.TRANSFER_DATE,
         STATUS_UPDATED_AT=datetime.utcnow() if normalized_status else None,
-        PHONE=payload.PHONE,
-        PHONE2=payload.PHONE2,
+        PHONE=_normalize_phone_text(payload.PHONE),
+        PHONE2=_normalize_phone_text(payload.PHONE2),
         EMAIL=payload.EMAIL,
         RESIDENCE=payload.RESIDENCE,
         church=effective_church,
@@ -1551,6 +1562,9 @@ def list_members(q: Optional[str] = None, auth: dict = Depends(require_api_key_o
             if qnum is not None:
                 mask = mask | (df['MEMBER_ID'] == qnum)
             df = df[mask]
+        for ph_col in ('PHONE', 'PHONE2'):
+            if ph_col in df.columns:
+                df[ph_col] = df[ph_col].apply(_normalize_phone_text)
         rows = df.to_dict(orient='records')
         out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
         return out
@@ -1578,25 +1592,25 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
                     """
                     UPDATE members SET
                         sno=:sno,
-                        MEMBER_NAME=:mn,
-                        MEMBER_ID=:mid,
-                        FAMILY_ID=:fid,
-                        DEFAULT_FAMILY_ID=:dfid,
-                        OFFICIAL_MEMBER_ID=:omid,
+                        "MEMBER_NAME"=:mn,
+                        "MEMBER_ID"=:mid,
+                        "FAMILY_ID"=:fid,
+                        "DEFAULT_FAMILY_ID"=:dfid,
+                        "OFFICIAL_MEMBER_ID"=:omid,
                         pledge=:pledge,
-                        GROUP_NAME=:gname,
-                        GROUP_ALIAS=:galias,
-                        DEFAULT_GROUP_ALIAS=:dgalias,
-                        GROUP_LEADER_ID=:gleader,
-                        DEFAULT_GROUP_LEADER_ID=:dgleader,
-                        STATUS=:status,
-                        TRANSFER_TO_CHURCH=:transfer_to_church,
-                        TRANSFER_DATE=:transfer_date,
-                        STATUS_UPDATED_AT=:status_updated_at,
-                        PHONE=:phone,
-                        PHONE2=:phone2,
-                        EMAIL=:email,
-                        RESIDENCE=:res
+                        "GROUP_NAME"=:gname,
+                        "GROUP_ALIAS"=:galias,
+                        "DEFAULT_GROUP_ALIAS"=:dgalias,
+                        "GROUP_LEADER_ID"=:gleader,
+                        "DEFAULT_GROUP_LEADER_ID"=:dgleader,
+                        "STATUS"=:status,
+                        "TRANSFER_TO_CHURCH"=:transfer_to_church,
+                        "TRANSFER_DATE"=:transfer_date,
+                        "STATUS_UPDATED_AT"=:status_updated_at,
+                        "PHONE"=:phone,
+                        "PHONE2"=:phone2,
+                        "EMAIL"=:email,
+                        "RESIDENCE"=:res
                             ,
                             church=:church
                     WHERE id=:id
@@ -1619,8 +1633,8 @@ def update_member(member_id: int, payload: MemberIn, auth: dict = Depends(requir
                     "transfer_to_church": payload.TRANSFER_TO_CHURCH,
                     "transfer_date": payload.TRANSFER_DATE,
                     "status_updated_at": datetime.utcnow() if normalized_status else None,
-                    "phone": payload.PHONE,
-                    "phone2": payload.PHONE2,
+                    "phone": _normalize_phone_text(payload.PHONE),
+                    "phone2": _normalize_phone_text(payload.PHONE2),
                     "email": payload.EMAIL,
                     "res": payload.RESIDENCE,
                     "church": effective_church,
