@@ -496,11 +496,29 @@ tokens = Table(
     Column('created_at', DateTime, server_default=func.now()),
 )
 
+global_config = Table(
+    'global_config', metadata,
+    Column('key', String(100), primary_key=True),
+    Column('value', String(500), nullable=True),
+)
+
+def ensure_global_config_schema():
+    """Create global_config table if absent and seed the default system_name."""
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS global_config (key VARCHAR(100) PRIMARY KEY, value VARCHAR(500))"
+        ))
+        conn.execute(text(
+            "INSERT INTO global_config (key, value) SELECT 'system_name', 'Church Offerings' "
+            "WHERE NOT EXISTS (SELECT 1 FROM global_config WHERE key = 'system_name')"
+        ))
+
+
 def create_tables():
     """Create `members` and `members_collection` tables if they do not exist."""
     ensure_db_exists()
     # Create base tables first.
-    metadata.create_all(engine, tables=[church, members, collection_codes, header_mappings, uploaders, role_policies, users, tokens])
+    metadata.create_all(engine, tables=[church, members, collection_codes, header_mappings, uploaders, role_policies, users, tokens, global_config])
 
     # Ensure referenced members columns are uniquely constrained before creating dependent FKs.
     try:
@@ -564,6 +582,10 @@ def create_tables():
         pass
     try:
         seed_churches()
+    except Exception:
+        pass
+    try:
+        ensure_global_config_schema()
     except Exception:
         pass
     try:

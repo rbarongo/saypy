@@ -30,6 +30,7 @@ from .db import (
     upsert_role_policy,
     delete_role_policy,
     import_collection_codes_from_workbook,
+    ensure_global_config_schema,
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import inspect, text
@@ -1292,6 +1293,49 @@ def update_church_app_name(church_id: int, payload: AppNameIn, current_user: dic
         
         with engine.connect() as conn:
             conn.execute(text('UPDATE church SET app_name = :name WHERE id = :id'), {'name': app_name, 'id': church_id})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/config')
+def get_config():
+    """Return public system-wide configuration (no auth required)."""
+    try:
+        ensure_global_config_schema()
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT value FROM global_config WHERE key = 'system_name'")).fetchone()
+        system_name = row[0] if row and row[0] else 'Church Offerings'
+        return {'system_name': system_name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SystemNameIn(BaseModel):
+    system_name: str
+
+
+@app.put('/config/system_name')
+def update_system_name(payload: SystemNameIn, current_user: dict = Depends(get_current_user)):
+    """Update the system-wide login screen name. Only system_admin."""
+    try:
+        if not _is_system_admin_user(current_user):
+            raise HTTPException(status_code=403, detail='Only system admin can change the system name')
+        name = str(payload.system_name or '').strip()
+        if not name:
+            raise HTTPException(status_code=400, detail='system_name is required')
+        ensure_global_config_schema()
+        with engine.connect() as conn:
+            conn.execute(
+                text("INSERT INTO global_config (key, value) VALUES ('system_name', :v) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"),
+                {'v': name}
+            )
             try:
                 conn.commit()
             except Exception:

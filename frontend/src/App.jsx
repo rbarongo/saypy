@@ -81,9 +81,36 @@ export default function App(){
   // ----- Shared data -----
   const [churches, setChurches] = useState([])
   const [appName, setAppName] = useState('Church Offerings — Admin Console')  // Custom app name for the church
+  const [systemName, setSystemName] = useState('Church Offerings')
+  const [editingSystemName, setEditingSystemName] = useState('')
+  const [showEditSystemName, setShowEditSystemName] = useState(false)
+
+  async function fetchSystemName(){
+    try{
+      const res = await fetch('http://localhost:8000/config')
+      const data = await res.json().catch(()=>({}))
+      if(res.ok && data.system_name) setSystemName(data.system_name)
+    }catch(e){}
+  }
+
+  async function submitSystemName(){
+    try{
+      const res = await fetch('http://localhost:8000/config/system_name', {
+        method: 'PUT',
+        headers: authHeaders({'Content-Type':'application/json'}),
+        body: JSON.stringify({system_name: editingSystemName})
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setSystemName(editingSystemName)
+      setShowEditSystemName(false)
+      setStatus('System name updated')
+    }catch(e){ setStatus('Update system name failed: '+e.message) }
+  }
 
   useEffect(()=>{
     fetchChurches()
+    fetchSystemName()
   }, [])
 
   useEffect(()=>{
@@ -1021,16 +1048,37 @@ export default function App(){
   // If not authenticated, show a focused login screen (no menu)
   if(!user){
     return (
-      <div style={{fontFamily:'Arial',padding:18}}>
-        <h2>Church Offerings — Login</h2>
-        <div style={{marginTop:12}}>
-          <input placeholder='username' value={loginUser} onChange={e=>setLoginUser(e.target.value)} />
-          <input placeholder='password' type='password' value={loginPass} onChange={e=>setLoginPass(e.target.value)} />
-          <button onClick={doLogin}>Login</button>
+      <div style={{fontFamily:'Arial', minHeight:'100vh', display:'flex', flexDirection:'column', justifyContent:'center', alignItems:'center', background:'#f0f4f8'}}>
+        <div style={{width:'100%', maxWidth:400, background:'#fff', borderRadius:12, boxShadow:'0 4px 24px rgba(14,30,64,0.12)', padding:'40px 36px'}}>
+          <div style={{textAlign:'center', marginBottom:28}}>
+            <div style={{fontSize:28, fontWeight:800, color:'#0f2d5c', letterSpacing:'-0.01em'}}>{systemName}</div>
+            <div style={{fontSize:14, color:'#64748b', marginTop:6, fontWeight:500}}>Sign in to your account</div>
+          </div>
+          <div style={{display:'flex', flexDirection:'column', gap:12}}>
+            <input
+              placeholder='Username'
+              value={loginUser}
+              onChange={e=>setLoginUser(e.target.value)}
+              onKeyDown={e=>{ if(e.key==='Enter') doLogin() }}
+              style={{padding:'10px 12px', borderRadius:6, border:'1px solid #cbd5e1', fontSize:15, outline:'none'}}
+            />
+            <input
+              placeholder='Password'
+              type='password'
+              value={loginPass}
+              onChange={e=>setLoginPass(e.target.value)}
+              onKeyDown={e=>{ if(e.key==='Enter') doLogin() }}
+              style={{padding:'10px 12px', borderRadius:6, border:'1px solid #cbd5e1', fontSize:15, outline:'none'}}
+            />
+            <button
+              onClick={doLogin}
+              style={{padding:'10px 0', borderRadius:6, background:'#0f2d5c', color:'#fff', fontWeight:700, fontSize:15, border:'none', cursor:'pointer', marginTop:4}}
+            >Login</button>
+          </div>
           {statusMeta() && (
-            <div style={{marginTop:10,padding:'12px 14px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
-              <div style={{fontWeight:800,fontSize:15,color:statusMeta().style.title,marginBottom:4,letterSpacing:'0.01em'}}>{statusMeta().title}</div>
-              <div style={{fontSize:15,fontWeight:600,color:statusMeta().style.body,lineHeight:1.45}}>{statusMeta().body}</div>
+            <div style={{marginTop:16,padding:'12px 14px',borderRadius:8,border:statusMeta().style.border,background:statusMeta().style.background}}>
+              <div style={{fontWeight:800,fontSize:14,color:statusMeta().style.title,marginBottom:4,letterSpacing:'0.01em'}}>{statusMeta().title}</div>
+              <div style={{fontSize:14,fontWeight:600,color:statusMeta().style.body,lineHeight:1.45}}>{statusMeta().body}</div>
             </div>
           )}
         </div>
@@ -1254,6 +1302,24 @@ export default function App(){
           <div>
             <h3>Settings</h3>
             {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,marginBottom:12,borderRadius:6}}>⚠️ You do not have a church assigned. Only local church admins can access settings.</div>}
+
+            {String(user?.role || '').toLowerCase() === 'system_admin' && (
+              <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+                <h4>System Name <span style={{fontSize:12,color:'#64748b',fontWeight:400}}>(shown on login screen)</span></h4>
+                {!showEditSystemName ? (
+                  <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                    <span style={{fontWeight:600}}>{systemName}</span>
+                    <button onClick={()=>{ setEditingSystemName(systemName); setShowEditSystemName(true) }}>Edit</button>
+                  </div>
+                ) : (
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <input type='text' value={editingSystemName} onChange={e=>setEditingSystemName(e.target.value)} placeholder='System name' style={{minWidth:220}} />
+                    <button onClick={submitSystemName}>Save</button>
+                    <button onClick={()=>{ setShowEditSystemName(false); setEditingSystemName('') }}>Cancel</button>
+                  </div>
+                )}
+              </div>
+            )}
             
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
               <h4>Application Name</h4>
