@@ -673,7 +673,7 @@ def list_collection_codes(current_user: dict = Depends(get_current_user)):
         with engine.connect() as conn:
             result = conn.execute(text(query), params)
             rows = result.fetchall()
-            out = [dict(row) for row in rows]
+            out = [dict(row._mapping) for row in rows]
         
         return [{k: _serializable_value(v) for k, v in r.items()} for r in out]
     except Exception as e:
@@ -1244,7 +1244,7 @@ def get_church(church_id: int, current_user: dict = Depends(get_current_user)):
             row = result.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail='Church not found')
-            return dict(row)
+            return dict(row._mapping)
     except HTTPException:
         raise
     except Exception as e:
@@ -1351,7 +1351,7 @@ def list_church_collection_codes(church_id: int, current_user: dict = Depends(ge
                 {'church_id': church_id}
             )
             rows = result.fetchall()
-            out = [dict(row) for row in rows]
+            out = [dict(row._mapping) for row in rows]
 
         return [{k: _serializable_value(v) for k, v in r.items()} for r in out]
     except HTTPException:
