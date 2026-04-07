@@ -1541,7 +1541,7 @@ export default function App(){
                   : 'View existing church collection codes.'}
               </p>
               <p style={{fontSize:12,color:'#666'}}>These codes apply only to your church. Global codes are shared across all churches.</p>
-              {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,borderRadius:6}}>A church assignment is required to manage collection codes.</div>}
+              {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:'12px 14px',borderRadius:6,border:'1px solid #f59e0b',color:'#7c2d12',fontSize:15,fontWeight:700,lineHeight:1.45}}>A church assignment is required to manage collection codes.</div>}
 
               <div style={{marginBottom:12}}>
                 <button
