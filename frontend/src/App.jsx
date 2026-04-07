@@ -168,6 +168,8 @@ export default function App(){
   const [showCollectionCodesPanel, setShowCollectionCodesPanel] = useState(false)
   const [collectionCodesMaxRows, setCollectionCodesMaxRows] = useState(30)
   const [gridModeMain, setGridModeMain] = useState('classic')
+  const [uploadGridMode, setUploadGridMode] = useState('classic')
+  const [mappedPreviewMode, setMappedPreviewMode] = useState('scrollable')
   const [editingRole, setEditingRole] = useState(null)
   const [newRole, setNewRole] = useState({
     role: '',
@@ -1030,24 +1032,10 @@ export default function App(){
         <div>
           <div>
             <strong>{displayUserName(user)}</strong> ({user.role})
-            <button style={{marginLeft:8}} onClick={()=> setShowOwnPasswordForm(s=>!s)}>{showOwnPasswordForm ? 'Cancel Password Change' : 'Change Password'}</button>
             <button style={{marginLeft:8}} onClick={logout}>Logout</button>
           </div>
         </div>
       </header>
-
-      {showOwnPasswordForm && (
-        <div style={{marginTop:10,border:'1px solid #ddd',padding:10,borderRadius:6}}>
-          <h4 style={{marginTop:0}}>Change My Password</h4>
-          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-            <input type='password' placeholder='Current password' value={ownCurrentPassword} onChange={e=>setOwnCurrentPassword(e.target.value)} />
-            <input type='password' placeholder='New password' value={ownNewPassword} onChange={e=>setOwnNewPassword(e.target.value)} />
-            <input type='password' placeholder='Confirm new password' value={ownConfirmPassword} onChange={e=>setOwnConfirmPassword(e.target.value)} />
-            <button onClick={submitOwnPasswordReset}>Update Password</button>
-          </div>
-          <div style={{marginTop:6,fontSize:12,color:'#666'}}>{PASSWORD_HINT}</div>
-        </div>
-      )}
 
       <div style={{display:'grid',gridTemplateColumns:'220px 1fr',gap:16,marginTop:12}}>
         <aside style={{border:'1px solid #eee',borderRadius:8,padding:10,alignSelf:'start'}}>
@@ -1070,17 +1058,6 @@ export default function App(){
               <div style={{fontSize:15,fontWeight:600,color:statusMeta().style.body,lineHeight:1.45}}>{statusMeta().body}</div>
             </div>
           )}
-          <div style={{marginBottom:12, display:'flex', gap:12, alignItems:'center', flexWrap:'wrap'}}>
-            <div style={{fontSize:13, fontWeight:700, color:'#334155'}}>All Grids Mode</div>
-            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-              <input type='radio' name='main-grid-mode' checked={gridModeMain==='scrollable'} onChange={()=>setGridModeMain('scrollable')} />
-              Scrollable
-            </label>
-            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-              <input type='radio' name='main-grid-mode' checked={gridModeMain==='classic'} onChange={()=>setGridModeMain('classic')} />
-              Classic
-            </label>
-          </div>
         {page==='dashboard' && (
           <div>
             <h3>Dashboard</h3>
@@ -1199,6 +1176,63 @@ export default function App(){
           <div>
             <h3>Settings</h3>
             {!currentUserChurchId && <div style={{backgroundColor:'#fff3cd',padding:10,marginBottom:12,borderRadius:6}}>⚠️ You do not have a church assigned. Only local church admins can access settings.</div>}
+
+            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+              <h4>My Settings</h4>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12}}>
+                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
+                  <div style={{fontWeight:700,marginBottom:8}}>Main Grids Mode</div>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+                    <input type='radio' name='main-grid-mode-settings' checked={gridModeMain==='scrollable'} onChange={()=>setGridModeMain('scrollable')} />
+                    Scrollable
+                  </label>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
+                    <input type='radio' name='main-grid-mode-settings' checked={gridModeMain==='classic'} onChange={()=>setGridModeMain('classic')} />
+                    Classic
+                  </label>
+                </div>
+                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
+                  <div style={{fontWeight:700,marginBottom:8}}>Upload Grids Mode</div>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+                    <input type='radio' name='upload-grid-mode-settings' checked={uploadGridMode==='scrollable'} onChange={()=>setUploadGridMode('scrollable')} />
+                    Scrollable
+                  </label>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
+                    <input type='radio' name='upload-grid-mode-settings' checked={uploadGridMode==='classic'} onChange={()=>setUploadGridMode('classic')} />
+                    Classic
+                  </label>
+                </div>
+                <div style={{border:'1px solid #eee',borderRadius:6,padding:10}}>
+                  <div style={{fontWeight:700,marginBottom:8}}>Mapped Preview Mode</div>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
+                    <input type='radio' name='mapped-preview-mode-settings' checked={mappedPreviewMode==='scrollable'} onChange={()=>setMappedPreviewMode('scrollable')} />
+                    Scrollable
+                  </label>
+                  <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600, marginTop:6}}>
+                    <input type='radio' name='mapped-preview-mode-settings' checked={mappedPreviewMode==='classic'} onChange={()=>setMappedPreviewMode('classic')} />
+                    Classic
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
+              <h4>Change My Password</h4>
+              {!showOwnPasswordForm ? (
+                <button onClick={()=> setShowOwnPasswordForm(true)}>Change Password</button>
+              ) : (
+                <>
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <input type='password' placeholder='Current password' value={ownCurrentPassword} onChange={e=>setOwnCurrentPassword(e.target.value)} />
+                    <input type='password' placeholder='New password' value={ownNewPassword} onChange={e=>setOwnNewPassword(e.target.value)} />
+                    <input type='password' placeholder='Confirm new password' value={ownConfirmPassword} onChange={e=>setOwnConfirmPassword(e.target.value)} />
+                    <button onClick={submitOwnPasswordReset}>Update Password</button>
+                    <button onClick={()=> setShowOwnPasswordForm(false)}>Cancel</button>
+                  </div>
+                  <div style={{marginTop:6,fontSize:12,color:'#666'}}>{PASSWORD_HINT}</div>
+                </>
+              )}
+            </div>
             
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
               <h4>Application Name</h4>
@@ -1403,6 +1437,8 @@ export default function App(){
               labelForColumn={labelForColumn}
               scopedChurchId={currentUserChurchId}
               onRestrictedChurchAttempt={denyRestrictedChurchAccess}
+              uploadGridMode={uploadGridMode}
+              mappedPreviewMode={mappedPreviewMode}
             />
 
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
@@ -1834,7 +1870,7 @@ function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, on
   )
 }
 
-function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn, scopedChurchId, onRestrictedChurchAttempt}){
+function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn, scopedChurchId, onRestrictedChurchAttempt, uploadGridMode, mappedPreviewMode}){
   // simplified copy of the prior upload UI kept local to this component scope
   const [step, setStep] = useState(1)
   const [file, setFile] = useState(null)
@@ -1849,8 +1885,6 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   const [apiKey, setApiKey] = useState('')
   const [apiKeyStatus, setApiKeyStatus] = useState('')
   const [mappedPreview, setMappedPreview] = useState([])
-  const [mappedPreviewMode, setMappedPreviewMode] = useState('scrollable')
-  const [uploadGridMode, setUploadGridMode] = useState('classic')
   const [validationErrors, setValidationErrors] = useState([])
   const [promptState, setPromptState] = useState({ open: false, level: 'info', message: '' })
   const [copiedPrompt, setCopiedPrompt] = useState(false)
@@ -1903,7 +1937,10 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   function mappedPreviewColumnsLocal(){
     const first = mappedPreview[0]
     if(!first) return []
-    return Object.keys(first).filter(k=> !['collection_code','church','s2','source'].includes(k))
+    return Object.keys(first).filter(k=> {
+      if(['collection_code','church','s2','source'].includes(k)) return false
+      return localLabelForColumn(k) !== 'NA.'
+    })
   }
 
   function currentChurchNameLocal(){
@@ -2094,17 +2131,6 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         </div>
       )}
       <div style={{marginBottom:8,color:'#333'}}>Step {step} of {totalSteps}</div>
-      <div style={{marginBottom:10, display:'flex', gap:12, alignItems:'center', flexWrap:'wrap'}}>
-        <div style={{fontSize:13, fontWeight:700, color:'#334155'}}>Upload Grids Mode</div>
-        <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-          <input type='radio' name='upload-grid-mode' checked={uploadGridMode==='scrollable'} onChange={()=>setUploadGridMode('scrollable')} />
-          Scrollable
-        </label>
-        <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-          <input type='radio' name='upload-grid-mode' checked={uploadGridMode==='classic'} onChange={()=>setUploadGridMode('classic')} />
-          Classic
-        </label>
-      </div>
       {step===1 && (
         <div>
           <div>
@@ -2179,17 +2205,6 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       {step===3 && (
         <div>
           <h4>Mapped preview ({mappedPreview.length} rows)</h4>
-          <div style={{marginBottom:10, display:'flex', gap:16, alignItems:'center', flexWrap:'wrap'}}>
-            <div style={{fontSize:13, fontWeight:700, color:'#334155'}}>Preview Mode</div>
-            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-              <input type='radio' name='mapped-preview-mode' checked={mappedPreviewMode==='scrollable'} onChange={()=>setMappedPreviewMode('scrollable')} />
-              Scrollable grid
-            </label>
-            <label style={{display:'flex', gap:6, alignItems:'center', color:'#111827', fontWeight:600}}>
-              <input type='radio' name='mapped-preview-mode' checked={mappedPreviewMode==='classic'} onChange={()=>setMappedPreviewMode('classic')} />
-              Classic grid
-            </label>
-          </div>
           <div style={{marginBottom:10, display:'flex', gap:16, flexWrap:'wrap', alignItems:'stretch', padding:'12px 14px', border:'1px solid #d1d5db', borderRadius:8, background:'#f8fafc'}}>
             <div style={{display:'flex', flexDirection:'column', minWidth:180}}>
               <div style={{fontSize:12, fontWeight:800, letterSpacing:'0.05em', textTransform:'uppercase', color:'#475569'}}>Church</div>
