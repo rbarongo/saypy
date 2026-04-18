@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import binascii
 import pandas as pd
+from .reports import compute_period_summary
 from .db import (
     get_target_columns,
     insert_dataframe,
@@ -880,6 +881,8 @@ class CollectionCodeIn(BaseModel):
     column_name: str
     code: str | None = None
     custom_collection_name: str | None = None
+    scope: str | None = None  # 'local' | 'conference' | 'split'
+    conference_split_pct: float | None = None  # 0-100, used when scope='split'
 
 
 class AppNameIn(BaseModel):
@@ -1436,8 +1439,8 @@ def create_church_collection_code(church_id: int, payload: CollectionCodeIn, cur
             raise HTTPException(status_code=403, detail='You can only manage codes for your own church')
         
         with engine.connect() as conn:
-            conn.execute(text("INSERT INTO collection_codes (column_name, code, custom_collection_name, church) VALUES (:cn, :c, :ccn, :ch)"), 
-                        {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "ch": church_id})
+            conn.execute(text("INSERT INTO collection_codes (column_name, code, custom_collection_name, church, scope, conference_split_pct) VALUES (:cn, :c, :ccn, :ch, :sc, :csp)"), 
+                        {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "ch": church_id, "sc": payload.scope, "csp": payload.conference_split_pct})
             try:
                 conn.commit()
             except Exception:
@@ -1499,8 +1502,8 @@ def update_church_collection_code(church_id: int, code_id: int, payload: Collect
             if not row or row[0] != church_id:
                 raise HTTPException(status_code=404, detail='Code not found or does not belong to this church')
             
-            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c, custom_collection_name=:ccn WHERE id=:id"), 
-                        {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "id": code_id})
+            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c, custom_collection_name=:ccn, scope=:sc, conference_split_pct=:csp WHERE id=:id"), 
+                        {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "sc": payload.scope, "csp": payload.conference_split_pct, "id": code_id})
             try:
                 conn.commit()
             except Exception:
@@ -1553,7 +1556,7 @@ def update_collection_code(code_id: int, payload: CollectionCodeIn, auth: dict =
                 if not row:
                     raise HTTPException(status_code=404, detail='Code not found')
                 _enforce_church_scope(row[0], actor_church, context='this collection code')
-            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c, custom_collection_name=:ccn WHERE id=:id"), {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "id": code_id})
+            conn.execute(text("UPDATE collection_codes SET column_name=:cn, code=:c, custom_collection_name=:ccn, scope=:sc, conference_split_pct=:csp WHERE id=:id"), {"cn": payload.column_name, "c": payload.code, "ccn": payload.custom_collection_name, "sc": payload.scope, "csp": payload.conference_split_pct, "id": code_id})
             try:
                 conn.commit()
             except Exception:
@@ -1830,6 +1833,36 @@ def report_members_collections(
         rows = df.to_dict(orient='records')
         out = [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
         return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/reports/period_summary')
+def report_period_summary(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    auth: dict = Depends(require_api_key_or_user),
+):
+    """Period summary report — aggregated conference / local / total per collection item.
+
+    Business logic lives in ``backend/reports.py :: compute_period_summary``.
+    Edit that module to change aggregation rules, label overrides, or split
+    percentages without touching the API routing layer.
+    """
+    _require_auth_any_right(
+        auth,
+        {'can_manage_members_collections', 'can_view_reports'},
+        context='period summary report',
+    )
+    actor_church = _auth_context_church(auth)
+    try:
+        return compute_period_summary(
+            actor_church=actor_church,
+            start_date=start_date,
+            end_date=end_date,
+        )
     except HTTPException:
         raise
     except Exception as e:

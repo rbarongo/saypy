@@ -190,8 +190,10 @@ export default function App(){
   const [newCodeColumn, setNewCodeColumn] = useState('')
   const [newCodeLabel, setNewCodeLabel] = useState('')
   const [newCodeCustomName, setNewCodeCustomName] = useState('')
+  const [newCodeScope, setNewCodeScope] = useState('')
+  const [newCodeSplitPct, setNewCodeSplitPct] = useState('')
   const [editingCodeId, setEditingCodeId] = useState(null)
-  const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:'', custom_collection_name:''})
+  const [editCodeForm, setEditCodeForm] = useState({column_name:'', code:'', custom_collection_name:'', scope:'', conference_split_pct:''})
   const [showCollectionCodesPanel, setShowCollectionCodesPanel] = useState(false)
   const [collectionCodesMaxRows, setCollectionCodesMaxRows] = useState(30)
   const [gridModeMain, setGridModeMain] = useState('classic')
@@ -243,13 +245,15 @@ export default function App(){
       const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes`, {
         method: 'POST',
         headers: {...authHeaders(), 'Content-Type':'application/json'},
-        body: JSON.stringify({column_name: newCodeColumn, code: newCodeLabel, custom_collection_name: (newCodeCustomName || null)})
+        body: JSON.stringify({column_name: newCodeColumn, code: newCodeLabel, custom_collection_name: (newCodeCustomName || null), scope: (newCodeScope || null), conference_split_pct: (newCodeSplitPct !== '' ? Number(newCodeSplitPct) : null)})
       })
       const data = await res.json().catch(()=>({}))
       if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
       setNewCodeColumn('')
       setNewCodeLabel('')
       setNewCodeCustomName('')
+      setNewCodeScope('')
+      setNewCodeSplitPct('')
       fetchLocalCodes()
       setStatus('Code created successfully')
     }catch(e){ setStatus('Create code failed: '+e.message) }
@@ -262,12 +266,12 @@ export default function App(){
       const res = await fetch(`http://localhost:8000/churches/${currentUserChurchId}/collection_codes/${editingCodeId}`, {
         method: 'PUT',
         headers: {...authHeaders(), 'Content-Type':'application/json'},
-        body: JSON.stringify({column_name: editCodeForm.column_name, code: editCodeForm.code, custom_collection_name: (editCodeForm.custom_collection_name || null)})
+        body: JSON.stringify({column_name: editCodeForm.column_name, code: editCodeForm.code, custom_collection_name: (editCodeForm.custom_collection_name || null), scope: (editCodeForm.scope || null), conference_split_pct: (editCodeForm.conference_split_pct !== '' && editCodeForm.conference_split_pct != null ? Number(editCodeForm.conference_split_pct) : null)})
       })
       const data = await res.json().catch(()=>({}))
       if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
       setEditingCodeId(null)
-      setEditCodeForm({column_name:'', code:'', custom_collection_name:''})
+      setEditCodeForm({column_name:'', code:'', custom_collection_name:'', scope:'', conference_split_pct:''})
       fetchLocalCodes()
       setStatus('Code updated successfully')
     }catch(e){ setStatus('Update code failed: '+e.message) }
@@ -1402,9 +1406,27 @@ export default function App(){
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
   const [aggRows, setAggRows] = useState([])
+  const [selectedReportBuilder, setSelectedReportBuilder] = useState('meeting_summary')
+  const [builtReportRows, setBuiltReportRows] = useState([])
+  const [builtReportColumns, setBuiltReportColumns] = useState([])
+  const [meetingSummaryRows, setMeetingSummaryRows] = useState([])
+  const [meetingSummaryTotals, setMeetingSummaryTotals] = useState({local: 0, conference: 0, total: 0})
+  const [periodSummaryRows, setPeriodSummaryRows] = useState([])
+  const [periodSummaryTotals, setPeriodSummaryTotals] = useState({local: 0, conference: 0, total: 0})
+  const [periodSummaryLoading, setPeriodSummaryLoading] = useState(false)
+  const [periodSummaryFrom, setPeriodSummaryFrom] = useState('')
+  const [periodSummaryTo, setPeriodSummaryTo] = useState('')
   const [reportMaxRows, setReportMaxRows] = useState(30)
   const [reportCollectionsMaxRows, setReportCollectionsMaxRows] = useState(30)
   const [dashboardStats, setDashboardStats] = useState({ members: null, users: null, loading: false })
+
+  const reportBuilderOptions = [
+    { id: 'details', title: 'Detailed Entries', description: 'Full row-level report with category and amount.' },
+    { id: 'daily_totals', title: 'Daily Totals', description: 'Daily totals grouped into local, conference, and total.' },
+    { id: 'item_totals', title: 'Collection Item Totals', description: 'Totals per collection item by category.' },
+    { id: 'contributor_totals', title: 'Contributor Totals', description: 'Totals by contributor name (s4).' },
+    { id: 'meeting_summary', title: 'Meeting Summary Form', description: 'Attached-form style statement for meeting use.' },
+  ]
 
   async function fetchDashboardStats(){
     setDashboardStats(prev => ({ ...prev, loading: true }))
@@ -1441,7 +1463,205 @@ export default function App(){
       if(!res.ok){ setStatus('Report failed: '+(data.detail||data.error||JSON.stringify(data))); setReportRows([]); return }
       if(!Array.isArray(data)){ setStatus('Report returned unexpected response'); setReportRows([]); return }
       setReportRows(data)
+      setBuiltReportRows([])
+      setBuiltReportColumns([])
+      setMeetingSummaryRows([])
+      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
     }catch(e){ setStatus('Report failed: '+e.message); setReportRows([]) }
+  }
+
+  function safeNumber(v){
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+
+  function normalizeDateText(v){
+    if(!v) return ''
+    const d = new Date(v)
+    if(Number.isNaN(d.getTime())) return String(v)
+    return d.toISOString().slice(0, 10)
+  }
+
+  function labelForCollectionCode(code){
+    const raw = String(code || '').trim()
+    if(!raw) return 'Unknown'
+    const found = (collectionCodes || []).find(c=> String(c.column_name || '').toLowerCase() === raw.toLowerCase() || String(c.code || '').toLowerCase() === raw.toLowerCase())
+    return String(found?.custom_collection_name || found?.code || found?.column_name || raw)
+  }
+
+  function inferRowAmount(row){
+    if(!row || typeof row !== 'object') return 0
+    const code = String(row.collection_code || '').trim()
+    if(code){
+      const dynamicAmount = safeNumber(row[code])
+      if(dynamicAmount !== 0) return dynamicAmount
+    }
+    const fallbackKeys = ['amount', 'total_amount', 's5', 's6', 's7', 's8', 's9', 'c1', 'c2', 'c3']
+    for(const key of fallbackKeys){
+      const amount = safeNumber(row[key])
+      if(amount !== 0) return amount
+    }
+    return 0
+  }
+
+  function categorizeContribution(itemLabel){
+    const label = String(itemLabel || '').toLowerCase()
+    const conferenceWords = ['conference', 'conf', 'union', 'field', 'mkoa', 'headquarter', 'hq', 'makao']
+    const isConference = conferenceWords.some(w=> label.includes(w))
+    return isConference ? 'conference' : 'local'
+  }
+
+  function buildReportEntries(){
+    const rows = Array.isArray(reportRows) ? reportRows : []
+    return rows.map((row, idx)=>{
+      const itemCode = String(row?.collection_code || '')
+      const itemLabel = labelForCollectionCode(itemCode)
+      const amount = inferRowAmount(row)
+      const category = categorizeContribution(itemLabel)
+      return {
+        index: idx + 1,
+        date: normalizeDateText(row?.s2),
+        receipt_no: String(row?.s1 || ''),
+        contributor: String(row?.s4 || ''),
+        item_code: itemCode,
+        item_name: itemLabel,
+        category,
+        amount,
+      }
+    }).filter(entry=> entry.amount !== 0)
+  }
+
+  function groupAndSum(entries, keyBuilder){
+    const grouped = {}
+    entries.forEach(entry=>{
+      const key = keyBuilder(entry)
+      if(!grouped[key]) grouped[key] = {local: 0, conference: 0, total: 0, count: 0}
+      grouped[key][entry.category] += safeNumber(entry.amount)
+      grouped[key].total += safeNumber(entry.amount)
+      grouped[key].count += 1
+    })
+    return grouped
+  }
+
+  async function fetchPeriodSummary(){
+    setPeriodSummaryLoading(true)
+    setPeriodSummaryRows([])
+    setPeriodSummaryTotals({local: 0, conference: 0, total: 0})
+    try{
+      let url = 'http://localhost:8000/reports/period_summary'
+      const params = []
+      if(periodSummaryFrom) params.push(`start_date=${encodeURIComponent(periodSummaryFrom)}`)
+      if(periodSummaryTo) params.push(`end_date=${encodeURIComponent(periodSummaryTo)}`)
+      if(params.length) url += '?' + params.join('&')
+      const res = await authFetch(url)
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setPeriodSummaryRows(Array.isArray(data.rows) ? data.rows : [])
+      setPeriodSummaryTotals(data.totals || {local: 0, conference: 0, total: 0})
+    }catch(e){
+      setStatus('Period summary failed: ' + (e?.message || String(e)))
+    }finally{
+      setPeriodSummaryLoading(false)
+    }
+  }
+
+  function buildSelectedReport(){    const entries = buildReportEntries()
+    if(!entries.length){
+      setBuiltReportRows([])
+      setBuiltReportColumns([])
+      setMeetingSummaryRows([])
+      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+      setStatus('No report data found for the selected filters.')
+      return
+    }
+
+    if(selectedReportBuilder === 'details'){
+      setBuiltReportColumns(['date', 'receipt_no', 'contributor', 'item_name', 'category', 'amount'])
+      setBuiltReportRows(entries.map(e=>(
+        {
+          date: e.date,
+          receipt_no: e.receipt_no,
+          contributor: e.contributor,
+          item_name: e.item_name,
+          category: e.category,
+          amount: e.amount,
+        }
+      )))
+      setMeetingSummaryRows([])
+      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+      setStatus('Detailed entries report built successfully.')
+      return
+    }
+
+    if(selectedReportBuilder === 'daily_totals'){
+      const grouped = groupAndSum(entries, e=> e.date || 'Unknown date')
+      const out = Object.keys(grouped).sort().map(date=> ({
+        date,
+        local: grouped[date].local,
+        conference: grouped[date].conference,
+        total: grouped[date].total,
+        entries: grouped[date].count,
+      }))
+      setBuiltReportColumns(['date', 'entries', 'local', 'conference', 'total'])
+      setBuiltReportRows(out)
+      setMeetingSummaryRows([])
+      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+      setStatus('Daily totals report built successfully.')
+      return
+    }
+
+    if(selectedReportBuilder === 'item_totals'){
+      const grouped = groupAndSum(entries, e=> e.item_name || 'Unknown item')
+      const out = Object.keys(grouped).sort().map(item=> ({
+        item,
+        local: grouped[item].local,
+        conference: grouped[item].conference,
+        total: grouped[item].total,
+        entries: grouped[item].count,
+      }))
+      setBuiltReportColumns(['item', 'entries', 'local', 'conference', 'total'])
+      setBuiltReportRows(out)
+      setMeetingSummaryRows([])
+      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+      setStatus('Collection item totals report built successfully.')
+      return
+    }
+
+    if(selectedReportBuilder === 'contributor_totals'){
+      const grouped = groupAndSum(entries, e=> e.contributor || 'Unknown contributor')
+      const out = Object.keys(grouped).sort().map(contributor=> ({
+        contributor,
+        local: grouped[contributor].local,
+        conference: grouped[contributor].conference,
+        total: grouped[contributor].total,
+        entries: grouped[contributor].count,
+      }))
+      setBuiltReportColumns(['contributor', 'entries', 'local', 'conference', 'total'])
+      setBuiltReportRows(out)
+      setMeetingSummaryRows([])
+      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+      setStatus('Contributor totals report built successfully.')
+      return
+    }
+
+    const groupedMeeting = groupAndSum(entries, e=> e.item_name || 'Unknown item')
+    const rows = Object.keys(groupedMeeting).sort().map(item=> ({
+      item,
+      local: groupedMeeting[item].local,
+      conference: groupedMeeting[item].conference,
+      total: groupedMeeting[item].total,
+    }))
+    const totals = rows.reduce((acc, row)=> ({
+      local: acc.local + safeNumber(row.local),
+      conference: acc.conference + safeNumber(row.conference),
+      total: acc.total + safeNumber(row.total),
+    }), {local: 0, conference: 0, total: 0})
+
+    setMeetingSummaryRows(rows)
+    setMeetingSummaryTotals(totals)
+    setBuiltReportColumns([])
+    setBuiltReportRows([])
+    setStatus('Meeting summary form built successfully.')
   }
 
   function aggregateByCollectionCode(){
@@ -2274,6 +2494,15 @@ export default function App(){
                     <input type='text' value={newCodeColumn} onChange={e=>setNewCodeColumn(e.target.value)} placeholder='Code key (e.g. c21)' disabled={!currentUserChurchId} />
                     <input type='text' value={newCodeLabel} onChange={e=>setNewCodeLabel(e.target.value)} placeholder='Collection label' disabled={!currentUserChurchId} />
                     <input type='text' value={newCodeCustomName} onChange={e=>setNewCodeCustomName(e.target.value)} placeholder='Custom collection name (optional)' disabled={!currentUserChurchId} />
+                    <select value={newCodeScope} onChange={e=>setNewCodeScope(e.target.value)} disabled={!currentUserChurchId}>
+                      <option value=''>Scope: Local (default)</option>
+                      <option value='local'>Local</option>
+                      <option value='conference'>Conference</option>
+                      <option value='split'>Split</option>
+                    </select>
+                    {newCodeScope === 'split' && (
+                      <input type='number' min='0' max='100' step='0.01' value={newCodeSplitPct} onChange={e=>setNewCodeSplitPct(e.target.value)} placeholder='Conference % (e.g. 58)' style={{width:160}} disabled={!currentUserChurchId} />
+                    )}
                     <button onClick={createLocalCode} disabled={!currentUserChurchId}>Add Code</button>
                   </div>
                 </div>
@@ -2296,12 +2525,15 @@ export default function App(){
                           <td>{code.column_name}</td>
                           <td>{code.code}</td>
                           <td>{code.custom_collection_name || '-'}</td>
-                          <td>Local</td>
+                          <td>
+                            {String(code.scope || 'local')}
+                            {code.scope === 'split' && code.conference_split_pct != null ? ` (${code.conference_split_pct}% conf)` : ''}
+                          </td>
                           {canCollectionCodeEdit && (
                             <td>
                               {editingCodeId !== code.id ? (
                                 <>
-                                  <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code, custom_collection_name:(code.custom_collection_name || '')}); }} style={{marginRight:8}}>Edit</button>
+                                  <button onClick={()=>{ setEditingCodeId(code.id); setEditCodeForm({column_name:code.column_name, code:code.code, custom_collection_name:(code.custom_collection_name || ''), scope:(code.scope || ''), conference_split_pct:(code.conference_split_pct != null ? String(code.conference_split_pct) : '')}); }} style={{marginRight:8}}>Edit</button>
                                   {hasRoleRight('can_manage_collections', true) && <button onClick={()=>deleteLocalCode(code.id)}>Delete</button>}
                                 </>
                               ) : (
@@ -2309,8 +2541,17 @@ export default function App(){
                                   <input type='text' value={editCodeForm.column_name} onChange={e=>setEditCodeForm({...editCodeForm,column_name:e.target.value})} style={{marginRight:4}} />
                                   <input type='text' value={editCodeForm.code} onChange={e=>setEditCodeForm({...editCodeForm,code:e.target.value})} style={{marginRight:4}} />
                                   <input type='text' value={editCodeForm.custom_collection_name} onChange={e=>setEditCodeForm({...editCodeForm,custom_collection_name:e.target.value})} style={{marginRight:4}} />
+                                  <select value={editCodeForm.scope || ''} onChange={e=>setEditCodeForm({...editCodeForm,scope:e.target.value})} style={{marginRight:4}}>
+                                    <option value=''>Local (default)</option>
+                                    <option value='local'>Local</option>
+                                    <option value='conference'>Conference</option>
+                                    <option value='split'>Split</option>
+                                  </select>
+                                  {(editCodeForm.scope === 'split') && (
+                                    <input type='number' min='0' max='100' step='0.01' value={editCodeForm.conference_split_pct || ''} onChange={e=>setEditCodeForm({...editCodeForm,conference_split_pct:e.target.value})} placeholder='Conference %' style={{width:120, marginRight:4}} />
+                                  )}
                                   <button onClick={updateLocalCode} style={{marginRight:4}}>Save</button>
-                                  <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:'',custom_collection_name:''}); }}>Cancel</button>
+                                  <button onClick={()=>{ setEditingCodeId(null); setEditCodeForm({column_name:'',code:'',custom_collection_name:'',scope:'',conference_split_pct:''}); }}>Cancel</button>
                                 </>
                               )}
                             </td>
@@ -2730,6 +2971,61 @@ export default function App(){
         {page==='reports' && (
           <div>
             <h3>Reports</h3>
+
+            {/* ===== Period Summary Report ===== */}
+            <div style={{border:'1px solid #d1d5db', borderRadius:10, padding:14, marginBottom:16, background:'#fff'}}>
+              <div style={{fontWeight:800, fontSize:15, color:'#0f172a', marginBottom:6}}>Period Summary Report</div>
+              <div style={{fontSize:12, color:'#475569', marginBottom:10}}>
+                Aggregated collection summary by item, split into Conference and Local Church amounts.
+              </div>
+              <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:10}}>
+                <label>From:</label>
+                <input type='date' value={periodSummaryFrom} onChange={e=>setPeriodSummaryFrom(e.target.value)} />
+                <label>To:</label>
+                <input type='date' value={periodSummaryTo} onChange={e=>setPeriodSummaryTo(e.target.value)} />
+                <button type='button' onClick={fetchPeriodSummary} disabled={periodSummaryLoading}>{periodSummaryLoading ? 'Loading...' : 'Generate Summary'}</button>
+              </div>
+
+              {periodSummaryRows.length > 0 && (
+                <div>
+                  <div style={{fontSize:12, color:'#475569', marginBottom:6}}>
+                    Period: <strong>{periodSummaryFrom || 'All'}</strong> to <strong>{periodSummaryTo || 'All'}</strong>
+                  </div>
+                  <div style={mainGridWrapStyle(380)}>
+                    <table style={{...mainGridTableStyle(true), minWidth: 520}}>
+                      <thead>
+                        <tr>
+                          <th style={{textAlign:'left', background:'#f8b400', color:'#000'}}>Collection Item</th>
+                          <th style={{background:'#f8b400', color:'#000'}}>Conference</th>
+                          <th style={{background:'#f8b400', color:'#000'}}>Local Church</th>
+                          <th style={{background:'#f8b400', color:'#000'}}>Jumla / Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {periodSummaryRows.map((row, idx)=> (
+                          <tr key={idx}>
+                            <td style={{fontWeight:600}}>{row.item}</td>
+                            <td style={{textAlign:'right'}}>{row.conference !== 0 ? formatNumber(row.conference) : '-'}</td>
+                            <td style={{textAlign:'right'}}>{row.local !== 0 ? formatNumber(row.local) : '-'}</td>
+                            <td style={{textAlign:'right'}}>{formatNumber(row.total)}</td>
+                          </tr>
+                        ))}
+                        <tr style={{fontWeight:900, borderTop:'2px solid #334155', background:'#f8fafc'}}>
+                          <td>TOTAL</td>
+                          <td style={{textAlign:'right'}}>{formatNumber(periodSummaryTotals.conference)}</td>
+                          <td style={{textAlign:'right'}}>{formatNumber(periodSummaryTotals.local)}</td>
+                          <td style={{textAlign:'right'}}>{formatNumber(periodSummaryTotals.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {!periodSummaryLoading && periodSummaryRows.length === 0 && (
+                <div style={{color:'#94a3b8', fontSize:12}}>No data yet — pick a date range and click Generate Summary.</div>
+              )}
+            </div>
+
             <div>
               <h4>Members Collection Report</h4>
               <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
@@ -2745,6 +3041,34 @@ export default function App(){
                 </select>
                 <span style={{color:'#666'}}>Showing {Math.min(reportRows.length, reportMaxRows)} of {reportRows.length}</span>
               </div>
+
+              <div style={{marginTop:12, border:'1px solid #dbeafe', borderRadius:8, padding:10, background:'#f8fbff'}}>
+                <h4 style={{marginTop:0}}>Report Builders (5 Initial Reports)</h4>
+                <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:8, marginBottom:8}}>
+                  {reportBuilderOptions.map(opt=> (
+                    <button
+                      key={opt.id}
+                      type='button'
+                      onClick={()=>setSelectedReportBuilder(opt.id)}
+                      style={{
+                        textAlign:'left',
+                        border:'1px solid ' + (selectedReportBuilder === opt.id ? '#2563eb' : '#cbd5e1'),
+                        background:selectedReportBuilder === opt.id ? '#eff6ff' : '#fff',
+                        borderRadius:6,
+                        padding:'8px 10px',
+                      }}
+                    >
+                      <div style={{fontWeight:700}}>{opt.title}</div>
+                      <div style={{fontSize:12, color:'#475569'}}>{opt.description}</div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                  <button type='button' onClick={buildSelectedReport}>Build Selected Report</button>
+                  <span style={{fontSize:12, color:'#64748b'}}>Selected: {reportBuilderOptions.find(r=> r.id===selectedReportBuilder)?.title}</span>
+                </div>
+              </div>
+
               <div style={{...mainGridWrapStyle(400), marginTop:8}}>
                 <table style={mainGridTableStyle(true)}>
                   <thead>
@@ -2780,6 +3104,67 @@ export default function App(){
                   </div>
                 )}
               </div>
+
+              {builtReportRows.length > 0 && builtReportColumns.length > 0 && (
+                <div style={{marginTop:12}}>
+                  <h4>Built Report Output</h4>
+                  <div style={mainGridWrapStyle(320)}>
+                    <table style={mainGridTableStyle(true)}>
+                      <thead>
+                        <tr>{builtReportColumns.map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {builtReportRows.slice(0, reportMaxRows).map((row, idx)=> (
+                          <tr key={idx}>
+                            {builtReportColumns.map(col=> (
+                              <td key={col} style={{padding:6}}>
+                                {['local', 'conference', 'total', 'amount'].includes(col) ? formatNumber(row[col]) : String(row[col] ?? '')}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {meetingSummaryRows.length > 0 && (
+                <div style={{marginTop:12, border:'1px solid #d1d5db', borderRadius:8, padding:10, background:'#fff'}}>
+                  <h4 style={{margin:'0 0 8px'}}>Meeting Summary Form</h4>
+                  <div style={{fontSize:12, color:'#475569', marginBottom:8}}>
+                    Period: {reportFrom || 'All'} to {reportTo || 'All'}
+                  </div>
+                  <div style={mainGridWrapStyle(320)}>
+                    <table style={mainGridTableStyle(true)}>
+                      <thead>
+                        <tr>
+                          <th>Contribution Item</th>
+                          <th>Local</th>
+                          <th>Conference</th>
+                          <th>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {meetingSummaryRows.map((row, idx)=> (
+                          <tr key={idx}>
+                            <td>{row.item}</td>
+                            <td>{formatNumber(row.local)}</td>
+                            <td>{formatNumber(row.conference)}</td>
+                            <td>{formatNumber(row.total)}</td>
+                          </tr>
+                        ))}
+                        <tr style={{fontWeight:800, background:'#f8fafc'}}>
+                          <td>TOTAL</td>
+                          <td>{formatNumber(meetingSummaryTotals.local)}</td>
+                          <td>{formatNumber(meetingSummaryTotals.conference)}</td>
+                          <td>{formatNumber(meetingSummaryTotals.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
               {showCollectionsInReports && (
                 <div style={{marginTop:12}}>

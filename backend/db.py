@@ -818,7 +818,7 @@ def import_collection_codes_from_workbook(workbook_path: Optional[str] = None) -
 
 
 def ensure_collection_codes_schema():
-    """Ensure collection_codes has church and custom_collection_name columns."""
+    """Ensure collection_codes has required columns including scope and split pct."""
     inspector = inspect(engine)
     if 'collection_codes' not in inspector.get_table_names():
         return
@@ -826,6 +826,11 @@ def ensure_collection_codes_schema():
     expected = {
         'church': 'INTEGER',
         'custom_collection_name': 'TEXT',
+        # scope: 'local' | 'conference' | 'split' (NULL treated as 'local')
+        'scope': 'VARCHAR(20)',
+        # conference_split_pct: percentage (0-100) going to conference when scope='split'
+        # e.g. 58 means 58% conference, 42% local
+        'conference_split_pct': 'NUMERIC',
     }
     for col, typ in expected.items():
         if col in existing:
