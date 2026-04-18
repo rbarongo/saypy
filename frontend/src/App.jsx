@@ -607,6 +607,8 @@ export default function App(){
   const [showMemberForm, setShowMemberForm] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
   const [memberForm, setMemberForm] = useState({})
+  const [showTransferChurchCreator, setShowTransferChurchCreator] = useState(false)
+  const [newTransferChurchName, setNewTransferChurchName] = useState('')
   const [membersFields, setMembersFields] = useState([])
   const [showAllMemberCols, setShowAllMemberCols] = useState(false)
   const [membersVisibleCols, setMembersVisibleCols] = useState([])
@@ -737,6 +739,42 @@ export default function App(){
     if(!matches.length) return null
     const preferred = matches.find(c=> Number(c.church)===Number(currentUserChurchId)) || matches.find(c=> c.church == null) || matches[0]
     return preferred || null
+  }
+
+  async function createTransferChurchOption(){
+    try{
+      const canCreateChurch = String(user?.role || '').toLowerCase() === 'system_admin' || String(user?.username || '').toLowerCase() === 'saypy_admin'
+      if(!canCreateChurch){
+        setStatus('Only system admin can add new churches')
+        return
+      }
+      const name = String(newTransferChurchName || '').trim()
+      if(!name){
+        setStatus('Enter church name before adding')
+        return
+      }
+      const res = await authFetch('http://localhost:8000/churches', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ name })
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data) || 'Failed to create church')
+      const created = data?.church
+      if(created && created.id){
+        setChurches(prev => {
+          const exists = (prev || []).some(c => Number(c.id) === Number(created.id))
+          if(exists) return prev
+          return [...(prev || []), created]
+        })
+        setMemberForm(prev => ({...prev, TRANSFER_TO_CHURCH: Number(created.id), transfer_to_church: Number(created.id)}))
+      }
+      setShowTransferChurchCreator(false)
+      setNewTransferChurchName('')
+      setStatus('Church added and selected for transfer')
+    }catch(e){
+      setStatus('Create church failed: ' + (e?.message || String(e)))
+    }
   }
 
   function labelForColumn(col){
@@ -2105,15 +2143,38 @@ export default function App(){
                       )
                     }
                     if(key==='TRANSFER_TO_CHURCH' || key==='transfer_to_church'){
+                      const canCreateChurch = String(user?.role || '').toLowerCase() === 'system_admin' || String(user?.username || '').toLowerCase() === 'saypy_admin'
+                      const selectedTransferChurch = memberForm?.TRANSFER_TO_CHURCH ?? memberForm?.transfer_to_church ?? ''
                       return (
-                        <select key={key} value={val||''} onChange={e=>{
-                          const selected = e.target.value
-                          if(!canAccessChurch(selected)){ denyRestrictedChurchAccess('member transfer'); return }
-                          setMemberForm(prev=>({...prev,[key]: selected === '' ? null : Number(selected)}))
-                        }}>
-                          <option value=''>-- transfer to church --</option>
-                          {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
-                        </select>
+                        <div key={key} style={{display:'flex',flexDirection:'column',gap:6,minWidth:260}}>
+                          <select value={selectedTransferChurch || ''} onChange={e=>{
+                            const selected = e.target.value
+                            if(!canAccessChurch(selected)){ denyRestrictedChurchAccess('member transfer'); return }
+                            const mapped = selected === '' ? null : Number(selected)
+                            setMemberForm(prev=>({...prev, TRANSFER_TO_CHURCH: mapped, transfer_to_church: mapped}))
+                          }}>
+                            <option value=''>-- transfer to church --</option>
+                            {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
+                          </select>
+                          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                            <button type='button' onClick={()=>setShowTransferChurchCreator(v=>!v)}>
+                              {showTransferChurchCreator ? 'Cancel add church' : 'Add missing church'}
+                            </button>
+                            {!canCreateChurch && <span style={{fontSize:12,color:'#666'}}>System admin only</span>}
+                          </div>
+                          {showTransferChurchCreator && (
+                            <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                              <input
+                                placeholder='New church name'
+                                value={newTransferChurchName}
+                                onChange={e=>setNewTransferChurchName(e.target.value)}
+                                disabled={!canCreateChurch}
+                                style={{minWidth:180}}
+                              />
+                              <button type='button' onClick={createTransferChurchOption} disabled={!canCreateChurch}>Create</button>
+                            </div>
+                          )}
+                        </div>
                       )
                     }
                     if(key==='TRANSFER_DATE' || key==='transfer_date'){
@@ -2167,6 +2228,7 @@ export default function App(){
               onRestrictedChurchAttempt={denyRestrictedChurchAccess}
               uploadGridMode={uploadGridMode}
               mappedPreviewMode={mappedPreviewMode}
+              canManageCollections={hasRoleRight('can_manage_collections', true)}
             />
 
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
@@ -2804,7 +2866,7 @@ function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, on
   )
 }
 
-function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn, scopedChurchId, onRestrictedChurchAttempt, uploadGridMode, mappedPreviewMode}){
+function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn, scopedChurchId, onRestrictedChurchAttempt, uploadGridMode, mappedPreviewMode, canManageCollections}){
   // simplified copy of the prior upload UI kept local to this component scope
   const [step, setStep] = useState(1)
   const [file, setFile] = useState(null)
@@ -2822,6 +2884,9 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   const [validationErrors, setValidationErrors] = useState([])
   const [promptState, setPromptState] = useState({ open: false, level: 'info', message: '' })
   const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [showQuickForm, setShowQuickForm] = useState(false)
+  const [quickRows, setQuickRows] = useState([{ id: 1, name: '', collection_date: '', amount: '', details: [] }])
+  const [quickSubmitting, setQuickSubmitting] = useState(false)
 
   // total steps (1=file/date/church, 2=mapping, 3=preview/edit, 4=fix, 5=done)
   const totalSteps = 5
@@ -2941,6 +3006,139 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   }
 
   const visibleChurches = (churches || []).filter(c=> canAccessChurch(c.id))
+
+  const quickDetailOptions = (collectionCodes || [])
+    .filter(c=> {
+      const churchOk = c && (c.church == null || Number(c.church) === Number(scopedChurchId))
+      if(!churchOk) return false
+      const col = String(c.column_name || '').toLowerCase()
+      const codeLabel = String(c.code || '').trim().toUpperCase()
+      if(!col) return false
+      if(codeLabel === 'UNUSED') return false
+      if(['collection_code', 'church', 'source', 'notes'].includes(col)) return false
+      if(col === 's1' || col === 's2' || col === 's3' || col === 's4') return false
+      return true
+    })
+    .sort((a,b)=>{
+      const al = String(a.custom_collection_name || a.code || a.column_name || '').toLowerCase()
+      const bl = String(b.custom_collection_name || b.code || b.column_name || '').toLowerCase()
+      return al.localeCompare(bl)
+    })
+
+  function makeQuickRow(){
+    return {
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      name: '',
+      collection_date: selectedDate || '',
+      amount: '',
+      details: [],
+    }
+  }
+
+  function updateQuickRow(rowId, patch){
+    setQuickRows(prev=> prev.map(r=> r.id === rowId ? {...r, ...patch} : r))
+  }
+
+  function addQuickRow(){
+    setQuickRows(prev=> [...prev, makeQuickRow()])
+  }
+
+  function removeQuickRow(rowId){
+    setQuickRows(prev=> {
+      const next = prev.filter(r=> r.id !== rowId)
+      return next.length ? next : [makeQuickRow()]
+    })
+  }
+
+  async function submitQuickRows(){
+    if(!canManageCollections){
+      showPrompt('warning', 'Your role can view the Collections menu but cannot submit collection rows.')
+      return
+    }
+    const effectiveChurch = selectedChurch || scopedChurchId
+    if(!effectiveChurch){
+      showPrompt('warning', 'Select a church before submitting collection rows.')
+      return
+    }
+    if(!quickDetailOptions.length){
+      showPrompt('warning', 'No collection detail items are configured for this church. Add collection codes first.')
+      return
+    }
+
+    const issues = []
+    const rowsForBulk = []
+    quickRows.forEach((r, idx)=>{
+      const rowNo = idx + 1
+      const name = String(r.name || '').trim()
+      const dateText = String(r.collection_date || '').trim()
+      const amountNumber = Number(String(r.amount || '').trim())
+      const detailIds = Array.isArray(r.details) ? r.details : []
+      if(!name) issues.push(`Row ${rowNo}: Name is required.`)
+      if(!dateText) issues.push(`Row ${rowNo}: Date of collection is required.`)
+      if(!Number.isFinite(amountNumber) || amountNumber <= 0) issues.push(`Row ${rowNo}: Amount must be greater than zero.`)
+      if(!detailIds.length) issues.push(`Row ${rowNo}: Pick at least one collection detail item.`)
+      const parsed = dateText ? new Date(dateText) : null
+      if(parsed && !Number.isNaN(parsed.getTime())){
+        detailIds.forEach(detailCol=>{
+          const option = quickDetailOptions.find(o=> o.column_name === detailCol)
+          if(!option) return
+          rowsForBulk.push({
+            collection_code: detailCol,
+            church: effectiveChurch,
+            s2: parsed.toISOString(),
+            s4: name,
+            s5: amountNumber,
+            source: uploaderName || String(user?.username || ''),
+            notes: option.custom_collection_name || option.code || option.column_name,
+            [detailCol]: amountNumber,
+          })
+        })
+      }
+    })
+
+    if(issues.length){
+      showPrompt('warning', issues.join('\n'))
+      return
+    }
+    if(!rowsForBulk.length){
+      showPrompt('warning', 'No valid rows were prepared for submission.')
+      return
+    }
+
+    setQuickSubmitting(true)
+    try{
+      const validateRes = await authFetch('http://localhost:8000/members_collections/validate', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(rowsForBulk),
+      })
+      const validateData = await validateRes.json().catch(()=>({}))
+      if(!validateRes.ok){
+        throw new Error(validateData.detail || JSON.stringify(validateData) || 'Validation failed')
+      }
+      const validateErrors = Array.isArray(validateData.validation_errors) ? validateData.validation_errors : []
+      if(validateErrors.length){
+        setValidationErrors(validateErrors)
+        setStep(4)
+        showPrompt('warning', 'Quick form validation found issues. Review Step 4 for details.')
+        return
+      }
+
+      const res = await authFetch('http://localhost:8000/members_collections/bulk', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(rowsForBulk),
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data) || 'Submit failed')
+      showPrompt('success', `Saved ${data.inserted || 0} collection entries. You can keep adding more rows before closing the form.`)
+      setQuickRows([makeQuickRow()])
+    }catch(e){
+      showPrompt('error', 'Quick collection submit failed: ' + (e?.message || String(e)))
+    }finally{
+      setQuickSubmitting(false)
+    }
+  }
 
   function showPrompt(level, message){
     setCopiedPrompt(false)
@@ -3085,6 +3283,67 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
 
   return (
     <div>
+      <div style={{marginBottom:12, border:'1px solid #dbeafe', background:'#f8fbff', borderRadius:10, padding:12}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontWeight:800, color:'#0f172a'}}>Quick Collection Entry Form</div>
+            <div style={{fontSize:12, color:'#475569'}}>Enter one or more rows manually and submit to the same collections API used by upload.</div>
+          </div>
+          <button type='button' onClick={()=>setShowQuickForm(v=>!v)}>{showQuickForm ? 'Close form' : 'Open form'}</button>
+        </div>
+
+        {showQuickForm && (
+          <div style={{marginTop:12}}>
+            {!canManageCollections && <div style={{marginBottom:10, color:'#7c2d12', background:'#fff7ed', border:'1px solid #fdba74', borderRadius:6, padding:8}}>Your account can access Collections but cannot submit entries. Ask an admin to grant Collections management rights.</div>}
+            {quickRows.map((row, idx)=> (
+              <div key={row.id} style={{border:'1px solid #d1d5db', borderRadius:8, padding:10, marginBottom:10, background:'#fff'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
+                  <strong style={{color:'#0f172a'}}>Collection row {idx + 1}</strong>
+                  <button type='button' onClick={()=>removeQuickRow(row.id)} disabled={quickRows.length === 1 || quickSubmitting}>Remove</button>
+                </div>
+                <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(190px, 1fr))', gap:8, marginBottom:8}}>
+                  <div>
+                    <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Name</label>
+                    <input type='text' placeholder='Member or collection name' value={row.name} onChange={e=>updateQuickRow(row.id, {name: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
+                  </div>
+                  <div>
+                    <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Date of collection</label>
+                    <input type='date' value={row.collection_date} onChange={e=>updateQuickRow(row.id, {collection_date: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
+                  </div>
+                  <div>
+                    <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Collection amount</label>
+                    <input type='number' min='0' step='0.01' placeholder='0.00' value={row.amount} onChange={e=>updateQuickRow(row.id, {amount: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Collection details (pick one or more)</label>
+                  <select
+                    multiple
+                    size={Math.min(6, Math.max(3, quickDetailOptions.length || 3))}
+                    value={row.details}
+                    onChange={e=>updateQuickRow(row.id, {details: Array.from(e.target.selectedOptions).map(opt=>opt.value)})}
+                    disabled={quickSubmitting || !quickDetailOptions.length}
+                    style={{width:'100%', minHeight:90}}
+                  >
+                    {quickDetailOptions.map(opt=> (
+                      <option key={opt.column_name} value={opt.column_name}>
+                        {opt.custom_collection_name || opt.code || opt.column_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+
+            <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
+              <button type='button' onClick={addQuickRow} disabled={quickSubmitting}>Add another row</button>
+              <button type='button' onClick={submitQuickRows} disabled={quickSubmitting || !canManageCollections}>{quickSubmitting ? 'Submitting...' : 'Submit rows'}</button>
+              <button type='button' onClick={()=>setShowQuickForm(false)} disabled={quickSubmitting}>Close form</button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {promptState.open && (
         <div style={{marginBottom:10, border:'1px solid #d0d7de', borderLeft:`5px solid ${promptState.level==='error' ? '#d1242f' : promptState.level==='warning' ? '#d97706' : promptState.level==='success' ? '#2f7d32' : '#2563eb'}`, background:'#f8fafc', padding:12, borderRadius:8}}>
           <div style={{display:'flex', justifyContent:'space-between', gap:8, alignItems:'center', marginBottom:8}}>
