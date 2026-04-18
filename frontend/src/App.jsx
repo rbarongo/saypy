@@ -2885,7 +2885,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   const [promptState, setPromptState] = useState({ open: false, level: 'info', message: '' })
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [showQuickForm, setShowQuickForm] = useState(false)
-  const [quickRows, setQuickRows] = useState([{ id: 1, name: '', collection_date: '', amount: '', details: [] }])
+  const [quickRows, setQuickRows] = useState([{ id: 1, name: '', collection_date: '', total_amount: '', detail_entries: [], selected_detail: '', selected_detail_amount: '' }])
   const [quickSubmitting, setQuickSubmitting] = useState(false)
 
   // total steps (1=file/date/church, 2=mapping, 3=preview/edit, 4=fix, 5=done)
@@ -3030,8 +3030,10 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       id: Date.now() + Math.floor(Math.random() * 1000),
       name: '',
       collection_date: selectedDate || '',
-      amount: '',
-      details: [],
+      total_amount: '',
+      detail_entries: [],
+      selected_detail: '',
+      selected_detail_amount: '',
     }
   }
 
@@ -3048,6 +3050,48 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       const next = prev.filter(r=> r.id !== rowId)
       return next.length ? next : [makeQuickRow()]
     })
+  }
+
+  function addQuickDetailEntry(rowId){
+    let warning = ''
+    setQuickRows(prev=> prev.map(row=>{
+      if(row.id !== rowId) return row
+      const selectedDetail = String(row.selected_detail || '').trim()
+      const selectedAmount = Number(String(row.selected_detail_amount || '').trim())
+      if(!selectedDetail){
+        warning = 'Select a collection detail item before clicking Add item.'
+        return row
+      }
+      if(!Number.isFinite(selectedAmount) || selectedAmount <= 0){
+        warning = 'Enter a valid collection detail amount greater than zero.'
+        return row
+      }
+      if((row.detail_entries || []).some(e=> e.code === selectedDetail)){
+        warning = 'This collection detail item is already added. Remove it first to change the amount.'
+        return row
+      }
+      return {
+        ...row,
+        detail_entries: [...(row.detail_entries || []), { code: selectedDetail, amount: selectedAmount }],
+        selected_detail: '',
+        selected_detail_amount: '',
+      }
+    }))
+    if(warning) showPrompt('warning', warning)
+  }
+
+  function removeQuickDetailEntry(rowId, code){
+    setQuickRows(prev=> prev.map(row=>{
+      if(row.id !== rowId) return row
+      return {
+        ...row,
+        detail_entries: (row.detail_entries || []).filter(e=> e.code !== code),
+      }
+    }))
+  }
+
+  function quickRowDetailsTotal(row){
+    return (row?.detail_entries || []).reduce((sum, e)=> sum + Number(e?.amount || 0), 0)
   }
 
   async function submitQuickRows(){
@@ -3071,15 +3115,21 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       const rowNo = idx + 1
       const name = String(r.name || '').trim()
       const dateText = String(r.collection_date || '').trim()
-      const amountNumber = Number(String(r.amount || '').trim())
-      const detailIds = Array.isArray(r.details) ? r.details : []
+      const totalAmount = Number(String(r.total_amount || '').trim())
+      const detailEntries = Array.isArray(r.detail_entries) ? r.detail_entries : []
+      const detailTotal = detailEntries.reduce((sum, entry)=> sum + Number(entry?.amount || 0), 0)
       if(!name) issues.push(`Row ${rowNo}: Name is required.`)
       if(!dateText) issues.push(`Row ${rowNo}: Date of collection is required.`)
-      if(!Number.isFinite(amountNumber) || amountNumber <= 0) issues.push(`Row ${rowNo}: Amount must be greater than zero.`)
-      if(!detailIds.length) issues.push(`Row ${rowNo}: Pick at least one collection detail item.`)
+      if(!Number.isFinite(totalAmount) || totalAmount <= 0) issues.push(`Row ${rowNo}: Total collection amount must be greater than zero.`)
+      if(!detailEntries.length) issues.push(`Row ${rowNo}: Add at least one collection detail item.`)
+      if(Math.abs(detailTotal - totalAmount) > 0.009){
+        issues.push(`Row ${rowNo}: Sum of detail amounts (${detailTotal.toFixed(2)}) does not match total collection (${totalAmount.toFixed(2)}).`)
+      }
       const parsed = dateText ? new Date(dateText) : null
       if(parsed && !Number.isNaN(parsed.getTime())){
-        detailIds.forEach(detailCol=>{
+        detailEntries.forEach(entry=>{
+          const detailCol = entry.code
+          const detailAmount = Number(entry.amount || 0)
           const option = quickDetailOptions.find(o=> o.column_name === detailCol)
           if(!option) return
           rowsForBulk.push({
@@ -3087,10 +3137,10 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
             church: effectiveChurch,
             s2: parsed.toISOString(),
             s4: name,
-            s5: amountNumber,
+            s5: detailAmount,
             source: uploaderName || String(user?.username || ''),
-            notes: option.custom_collection_name || option.code || option.column_name,
-            [detailCol]: amountNumber,
+            notes: `${option.custom_collection_name || option.code || option.column_name} | Total: ${totalAmount}`,
+            [detailCol]: detailAmount,
           })
         })
       }
@@ -3286,7 +3336,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
       <div style={{marginBottom:12, border:'1px solid #dbeafe', background:'#f8fbff', borderRadius:10, padding:12}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           <div>
-            <div style={{fontWeight:800, color:'#0f172a'}}>Quick Collection Entry Form</div>
+            <div style={{fontWeight:800, color:'#0f172a'}}>Collection Form</div>
             <div style={{fontSize:12, color:'#475569'}}>Enter one or more rows manually and submit to the same collections API used by upload.</div>
           </div>
           <button type='button' onClick={()=>setShowQuickForm(v=>!v)}>{showQuickForm ? 'Close form' : 'Open form'}</button>
@@ -3311,26 +3361,67 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
                     <input type='date' value={row.collection_date} onChange={e=>updateQuickRow(row.id, {collection_date: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
                   </div>
                   <div>
-                    <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Collection amount</label>
-                    <input type='number' min='0' step='0.01' placeholder='0.00' value={row.amount} onChange={e=>updateQuickRow(row.id, {amount: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
+                    <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Total collection amount</label>
+                    <input type='number' min='0' step='0.01' placeholder='0.00' value={row.total_amount} onChange={e=>updateQuickRow(row.id, {total_amount: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
                   </div>
                 </div>
-                <div>
-                  <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Collection details (pick one or more)</label>
-                  <select
-                    multiple
-                    size={Math.min(6, Math.max(3, quickDetailOptions.length || 3))}
-                    value={row.details}
-                    onChange={e=>updateQuickRow(row.id, {details: Array.from(e.target.selectedOptions).map(opt=>opt.value)})}
-                    disabled={quickSubmitting || !quickDetailOptions.length}
-                    style={{width:'100%', minHeight:90}}
-                  >
-                    {quickDetailOptions.map(opt=> (
-                      <option key={opt.column_name} value={opt.column_name}>
-                        {opt.custom_collection_name || opt.code || opt.column_name}
-                      </option>
-                    ))}
-                  </select>
+                <div style={{border:'1px solid #e2e8f0', borderRadius:8, padding:10, background:'#f8fafc'}}>
+                  <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:6}}>Collection details</label>
+                  <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:8, alignItems:'end'}}>
+                    <div>
+                      <label style={{display:'block', fontSize:12, color:'#64748b', marginBottom:4}}>Collection item</label>
+                      <select
+                        value={row.selected_detail || ''}
+                        onChange={e=>updateQuickRow(row.id, {selected_detail: e.target.value})}
+                        disabled={quickSubmitting || !quickDetailOptions.length}
+                        style={{width:'100%'}}
+                      >
+                        <option value=''>-- select collection item --</option>
+                        {quickDetailOptions.map(opt=> (
+                          <option key={opt.column_name} value={opt.column_name}>
+                            {opt.custom_collection_name || opt.code || opt.column_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{display:'block', fontSize:12, color:'#64748b', marginBottom:4}}>Item amount</label>
+                      <input type='number' min='0' step='0.01' placeholder='0.00' value={row.selected_detail_amount || ''} onChange={e=>updateQuickRow(row.id, {selected_detail_amount: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
+                    </div>
+                    <div>
+                      <button type='button' onClick={()=>addQuickDetailEntry(row.id)} disabled={quickSubmitting || !quickDetailOptions.length}>Add item</button>
+                    </div>
+                  </div>
+                  <div style={{marginTop:10, display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+                    <strong style={{fontSize:12, color:'#334155'}}>Added items</strong>
+                    <span style={{fontSize:12, color:'#334155'}}>Details total: {quickRowDetailsTotal(row).toFixed(2)} | Expected total: {Number(row.total_amount || 0).toFixed(2)}</span>
+                  </div>
+                  {(!row.detail_entries || !row.detail_entries.length) ? (
+                    <div style={{marginTop:6, fontSize:12, color:'#64748b'}}>No collection detail items added yet.</div>
+                  ) : (
+                    <div style={{marginTop:8, border:'1px solid #d1d5db', borderRadius:6, overflow:'hidden'}}>
+                      <table style={{width:'100%', borderCollapse:'collapse'}}>
+                        <thead>
+                          <tr>
+                            <th style={{textAlign:'left', padding:'6px 8px', borderBottom:'1px solid #e2e8f0'}}>Item</th>
+                            <th style={{textAlign:'right', padding:'6px 8px', borderBottom:'1px solid #e2e8f0'}}>Amount</th>
+                            <th style={{textAlign:'center', padding:'6px 8px', borderBottom:'1px solid #e2e8f0'}}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.detail_entries.map(entry=> (
+                            <tr key={entry.code}>
+                              <td style={{padding:'6px 8px', borderBottom:'1px solid #f1f5f9'}}>{localLabelForColumn(entry.code)}</td>
+                              <td style={{padding:'6px 8px', borderBottom:'1px solid #f1f5f9', textAlign:'right'}}>{Number(entry.amount || 0).toFixed(2)}</td>
+                              <td style={{padding:'6px 8px', borderBottom:'1px solid #f1f5f9', textAlign:'center'}}>
+                                <button type='button' onClick={()=>removeQuickDetailEntry(row.id, entry.code)} disabled={quickSubmitting}>Remove</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
