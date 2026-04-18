@@ -3070,9 +3070,12 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         warning = 'This collection detail item is already added. Remove it first to change the amount.'
         return row
       }
+      const nextEntries = [...(row.detail_entries || []), { code: selectedDetail, amount: selectedAmount }]
+      const autoTotal = nextEntries.reduce((sum, e)=> sum + Number(e?.amount || 0), 0)
       return {
         ...row,
-        detail_entries: [...(row.detail_entries || []), { code: selectedDetail, amount: selectedAmount }],
+        detail_entries: nextEntries,
+        total_amount: String(autoTotal),
         selected_detail: '',
         selected_detail_amount: '',
       }
@@ -3083,9 +3086,12 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   function removeQuickDetailEntry(rowId, code){
     setQuickRows(prev=> prev.map(row=>{
       if(row.id !== rowId) return row
+      const nextEntries = (row.detail_entries || []).filter(e=> e.code !== code)
+      const autoTotal = nextEntries.reduce((sum, e)=> sum + Number(e?.amount || 0), 0)
       return {
         ...row,
-        detail_entries: (row.detail_entries || []).filter(e=> e.code !== code),
+        detail_entries: nextEntries,
+        total_amount: String(autoTotal),
       }
     }))
   }
@@ -3337,7 +3343,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           <div>
             <div style={{fontWeight:800, color:'#0f172a'}}>Collection Form</div>
-            <div style={{fontSize:12, color:'#475569'}}>Enter one or more rows manually and submit to the same collections API used by upload.</div>
+            <div style={{fontSize:12, color:'#475569'}}>Enter one or more rows manually.</div>
           </div>
           <button type='button' onClick={()=>setShowQuickForm(v=>!v)}>{showQuickForm ? 'Close form' : 'Open form'}</button>
         </div>
@@ -3354,7 +3360,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
                 <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(190px, 1fr))', gap:8, marginBottom:8}}>
                   <div>
                     <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Name</label>
-                    <input type='text' placeholder='Member or collection name' value={row.name} onChange={e=>updateQuickRow(row.id, {name: e.target.value})} disabled={quickSubmitting} style={{width:'100%'}} />
+                    <textarea placeholder='Member or collection name' value={row.name} onChange={e=>updateQuickRow(row.id, {name: e.target.value})} disabled={quickSubmitting} rows={2} style={{width:'100%', resize:'vertical'}} />
                   </div>
                   <div>
                     <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Date of collection</label>
@@ -3394,7 +3400,10 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
                   </div>
                   <div style={{marginTop:10, display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
                     <strong style={{fontSize:12, color:'#334155'}}>Added items</strong>
-                    <span style={{fontSize:12, color:'#334155'}}>Details total: {quickRowDetailsTotal(row).toFixed(2)} | Expected total: {Number(row.total_amount || 0).toFixed(2)}</span>
+                    <span style={{fontSize:12, color:'#334155'}}>Details total: {quickRowDetailsTotal(row).toFixed(2)} | Declared total: {Number(row.total_amount || 0).toFixed(2)}</span>
+                  </div>
+                  <div style={{marginTop:6, fontSize:12, fontWeight:700, color: Math.abs(quickRowDetailsTotal(row) - Number(row.total_amount || 0)) <= 0.009 ? '#166534' : '#b45309'}}>
+                    Audit: Difference = {(quickRowDetailsTotal(row) - Number(row.total_amount || 0)).toFixed(2)}
                   </div>
                   {(!row.detail_entries || !row.detail_entries.length) ? (
                     <div style={{marginTop:6, fontSize:12, color:'#64748b'}}>No collection detail items added yet.</div>
