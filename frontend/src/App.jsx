@@ -2229,6 +2229,7 @@ export default function App(){
               uploadGridMode={uploadGridMode}
               mappedPreviewMode={mappedPreviewMode}
               canManageCollections={hasRoleRight('can_manage_collections', true)}
+              membersLocal={membersLocal}
             />
 
             <div style={{marginTop:12,border:'1px solid #ddd',padding:10,borderRadius:6}}>
@@ -2866,7 +2867,7 @@ function CreateUserForm({onCreate, churches, scopedChurchId, canAccessChurch, on
   )
 }
 
-function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn, scopedChurchId, onRestrictedChurchAttempt, uploadGridMode, mappedPreviewMode, canManageCollections}){
+function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCodes, user, labelForColumn, scopedChurchId, onRestrictedChurchAttempt, uploadGridMode, mappedPreviewMode, canManageCollections, membersLocal}){
   // simplified copy of the prior upload UI kept local to this component scope
   const [step, setStep] = useState(1)
   const [file, setFile] = useState(null)
@@ -3143,7 +3144,6 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
             church: effectiveChurch,
             s2: parsed.toISOString(),
             s4: name,
-            s5: detailAmount,
             source: uploaderName || String(user?.username || ''),
             notes: `${option.custom_collection_name || option.code || option.column_name} | Total: ${totalAmount}`,
             [detailCol]: detailAmount,
@@ -3360,7 +3360,20 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
                 <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(190px, 1fr))', gap:8, marginBottom:8}}>
                   <div>
                     <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Name</label>
-                    <textarea placeholder='Member or collection name' value={row.name} onChange={e=>updateQuickRow(row.id, {name: e.target.value})} disabled={quickSubmitting} rows={2} style={{width:'100%', resize:'vertical'}} />
+                    <input
+                      type='text'
+                      list='quick-form-members-list'
+                      placeholder='Type or pick from members list'
+                      value={row.name}
+                      onChange={e=>updateQuickRow(row.id, {name: e.target.value})}
+                      disabled={quickSubmitting}
+                      style={{width:'100%'}}
+                    />
+                    <datalist id='quick-form-members-list'>
+                      {(membersLocal||[]).map(m=> (
+                        <option key={m.id} value={String(m.MEMBER_NAME||'')} />
+                      ))}
+                    </datalist>
                   </div>
                   <div>
                     <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Date of collection</label>
