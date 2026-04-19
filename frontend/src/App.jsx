@@ -1546,8 +1546,16 @@ export default function App(){
 
   async function fetchMembersCollectionReport(){
     try{
-      let url = 'http://localhost:8000/reports/members_collections';
-      if(reportFrom && reportTo) url += `?start_date=${encodeURIComponent(reportFrom)}&end_date=${encodeURIComponent(reportTo)}`;
+      const params = new URLSearchParams()
+      if(reportFrom) params.set('start_date', String(reportFrom))
+      if(reportTo) params.set('end_date', String(reportTo))
+      // Reports should summarize the selected period, not the API default preview window.
+      // Request a large limit so report builders work on complete data.
+      params.set('limit', '100000')
+      const qs = params.toString()
+      const url = qs
+        ? `http://localhost:8000/reports/members_collections?${qs}`
+        : 'http://localhost:8000/reports/members_collections'
       const res = await authFetch(url);
       const data = await res.json();
       if(!res.ok){ setStatus('Report failed: '+(data.detail||data.error||JSON.stringify(data))); setReportRows([]); return }
@@ -1760,9 +1768,15 @@ export default function App(){
 
   function normalizeDateText(v){
     if(!v) return ''
-    const d = new Date(v)
+    const raw = String(v).trim()
+    const direct = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if(direct) return `${direct[1]}-${direct[2]}-${direct[3]}`
+    const d = new Date(raw)
     if(Number.isNaN(d.getTime())) return String(v)
-    return d.toISOString().slice(0, 10)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
   }
 
   function labelForCollectionCode(code){
