@@ -12,16 +12,9 @@ pip install -r requirements.txt
 Environment configuration:
 
 1. Copy `.env.example` to `.env`.
-2. Use SQLite (default) or switch to cloud Postgres.
+2. Use Postgres (default) or switch to SQLite if needed.
 
-SQLite example:
-
-```
-DB_ENGINE=sqlite
-SQLITE_PATH=./members.db
-```
-
-Cloud Postgres example (single URL):
+Postgres example (single URL):
 
 ```
 DB_ENGINE=postgres
@@ -29,7 +22,7 @@ DATABASE_URL=postgresql://user:password@db-host:5432/dbname
 DB_SSLMODE=require
 ```
 
-Cloud Postgres example (separate entries):
+Postgres example (separate entries):
 
 ```
 DB_ENGINE=postgres
@@ -39,6 +32,13 @@ PGDATABASE=dbname
 PGUSER=dbuser
 PGPASSWORD=dbpassword
 DB_SSLMODE=require
+```
+
+SQLite example:
+
+```
+DB_ENGINE=sqlite
+SQLITE_PATH=./members.db
 ```
 
 Migration from Access to SQLite:

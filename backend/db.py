@@ -26,7 +26,8 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv()
 
 # Config: DB_ENGINE can be 'sqlite' or 'postgres' (or 'postgresql')
-DB_ENGINE = os.getenv("DB_ENGINE", "sqlite").lower()
+# Default to postgres to match production deployments unless explicitly overridden.
+DB_ENGINE = os.getenv("DB_ENGINE", "postgres").lower()
 
 
 def _env_int(name: str, default: int) -> int:
@@ -58,7 +59,12 @@ def _build_postgres_url_from_parts() -> str:
 _sqlite_default_path = os.path.join(BASE_DIR, "members.db")
 if DB_ENGINE in ("sqlite", "sqlite3"):
     SQLITE_PATH = os.getenv("SQLITE_PATH", _sqlite_default_path)
-    DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{SQLITE_PATH}")
+    # In sqlite mode, avoid accidentally reusing a postgres DATABASE_URL from env files.
+    _database_url_env = (os.getenv("DATABASE_URL") or "").strip()
+    if _database_url_env.lower().startswith("sqlite"):
+        DATABASE_URL = _database_url_env
+    else:
+        DATABASE_URL = f"sqlite:///{SQLITE_PATH}"
 else:
     # For postgres: expect DATABASE_URL like 'postgresql://user:pass@host:port/dbname'
     DATABASE_URL = os.getenv("DATABASE_URL", "") or _build_postgres_url_from_parts()
