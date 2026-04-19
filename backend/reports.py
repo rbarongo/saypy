@@ -216,11 +216,36 @@ def _coerce_collection_datetime_series(series: pd.Series) -> pd.Series:
 
 
 def _is_contribution_code(col_name: str) -> bool:
-    """Return True for columns that represent contribution items, not metadata fields."""
-    c = str(col_name or '').strip().lower()
-    if re.fullmatch(r'(c|l)\d+', c):
-        return True
-    return c in {'s6', 's7', 's8', 's9', 's13'}
+    """Legacy compatibility wrapper (kept for external references)."""
+    return _is_reportable_code(col_name, col_name)
+
+
+def _is_total_like(text_value: str) -> bool:
+    t = str(text_value or '').strip().lower()
+    if not t:
+        return False
+    return ('jumla' in t) or ('total' in t)
+
+
+def _is_reportable_code(column_name: str, label: str) -> bool:
+    """Return True only for collection items that should appear in Period Summary."""
+    c = str(column_name or '').strip().lower()
+    if not c:
+        return False
+
+    # Technical/meta/total fields should never be report rows.
+    non_item_cols = {
+        's1', 's2', 's3', 's4', 's5',
+        's7', 's8', 's9',
+        's10', 's11', 's12', 's14',
+    }
+    if c in non_item_cols:
+        return False
+
+    if _is_total_like(c) or _is_total_like(label):
+        return False
+
+    return True
 
 
 def _iter_members_collection_chunks(chunk_size: int = 5000):
@@ -283,9 +308,12 @@ def compute_period_summary(
     # ---- build code map ---------------------------------------------------
     code_map = _build_code_map(actor_church)
     code_map = _apply_label_overrides(code_map)
-    code_map = {k: v for k, v in code_map.items() if _is_contribution_code(k)}
+    code_map = {
+        k: v for k, v in code_map.items()
+        if _is_reportable_code(k, v.get('label'))
+    }
     code_alias_map = _build_code_alias_map(actor_church)
-    code_alias_map = {k: v for k, v in code_alias_map.items() if _is_contribution_code(v)}
+    code_alias_map = {k: v for k, v in code_alias_map.items() if v in code_map}
 
     if not code_map:
         return empty_result
@@ -338,7 +366,8 @@ def compute_period_summary(
         mapped_amount_cols = [c for c in code_map.keys() if c in df.columns]
 
         for _, row in df.iterrows():
-            col_name_raw = str(row.get('collection_code') or '').strip().lower()
+            col_name_display = str(row.get('collection_code') or '').strip()
+            col_name_raw = col_name_display.lower()
             col_lower = code_alias_map.get(col_name_raw, col_name_raw)
 
             info = code_map.get(col_lower)
@@ -348,8 +377,8 @@ def compute_period_summary(
             if col_lower and col_lower in df.columns:
                 amount = _finite_amount(row.get(col_lower))
 
-            # Fallback used by some imports: collection_code is set, amount is in s5.
-            if info is not None and amount == 0.0 and 's5' in df.columns:
+            # Fallback used by some imports: amount is in s5.
+            if amount == 0.0 and 's5' in df.columns:
                 amount = _finite_amount(row.get('s5'))
 
             # If collection_code is missing (legacy rows), infer item from a mapped contribution column.
@@ -362,7 +391,11 @@ def compute_period_summary(
                         amount = mv
                         break
 
-            # Report should only include configured collection codes with actual amounts.
+            # If no configured mapping exists, display collection_code as-is.
+            if info is None and col_name_display and not _is_total_like(col_name_display):
+                info = {'label': col_name_display, 'scope': None, 'conf_pct': None, 'church': None}
+                col_lower = f'raw::{col_name_display.lower()}'
+
             if info is None or amount == 0.0:
                 continue
 
