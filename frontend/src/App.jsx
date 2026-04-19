@@ -2741,6 +2741,12 @@ export default function App(){
     return false
   }
 
+  function isBuiltReportRightAlignedColumn(col, builderId = builtReportType){
+    const key = String(col || '').trim().toLowerCase()
+    if(builderId === 'item_totals' && ['entries', 'local', 'conference', 'total'].includes(key)) return true
+    return isBuiltReportNumericColumn(col, builderId)
+  }
+
   function exportBuiltReportExcel(){
     try{
       const dataset = currentBuiltReportDataset()
@@ -4477,7 +4483,7 @@ export default function App(){
                   <div style={mainGridWrapStyle(320)}>
                     <table style={mainGridTableStyle(true)}>
                       <thead>
-                        <tr>{builtReportColumns.map(c=> <th key={c}>{labelForBuiltReportColumn(c)}</th>)}</tr>
+                        <tr>{builtReportColumns.map(c=> <th key={c} style={isBuiltReportRightAlignedColumn(c, builtReportType) ? {textAlign:'right'} : undefined}>{labelForBuiltReportColumn(c)}</th>)}</tr>
                       </thead>
                       <tbody>
                         {builtReportRows.slice(0, reportMaxRows).map((row, idx)=> (
@@ -4488,7 +4494,7 @@ export default function App(){
                               : undefined}
                           >
                             {builtReportColumns.map(col=> (
-                              <td key={col} style={{padding:6}}>
+                              <td key={col} style={isBuiltReportRightAlignedColumn(col, builtReportType) ? {padding:6, textAlign:'right'} : {padding:6}}>
                                 {isBuiltReportNumericColumn(col, builtReportType) ? formatNumber(row[col]) : String(row[col] ?? '')}
                               </td>
                             ))}
