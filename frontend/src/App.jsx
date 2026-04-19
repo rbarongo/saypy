@@ -3484,19 +3484,25 @@ export default function App(){
                     Period: <strong>{periodSummaryFrom || 'All'}</strong> to <strong>{periodSummaryTo || 'All'}</strong>
                   </div>
                   <div style={mainGridWrapStyle(380)}>
-                    <table style={{...mainGridTableStyle(true), minWidth: 520}}>
+                    <table style={{...mainGridTableStyle(true), minWidth: 640, width:'100%', tableLayout:'fixed'}}>
+                      <colgroup>
+                        <col style={{width:'40%'}} />
+                        <col style={{width:'20%'}} />
+                        <col style={{width:'20%'}} />
+                        <col style={{width:'20%'}} />
+                      </colgroup>
                       <thead>
                         <tr>
                           <th style={{textAlign:'left', background:'#f8b400', color:'#000'}}>Collection Item</th>
-                          <th style={{background:'#f8b400', color:'#000'}}>Conference</th>
-                          <th style={{background:'#f8b400', color:'#000'}}>{currentChurchName()}</th>
-                          <th style={{background:'#f8b400', color:'#000'}}>Jumla / Total</th>
+                          <th style={{textAlign:'right', background:'#f8b400', color:'#000'}}>Conference</th>
+                          <th style={{textAlign:'right', background:'#f8b400', color:'#000'}}>{currentChurchName()}</th>
+                          <th style={{textAlign:'right', background:'#f8b400', color:'#000'}}>Jumla / Total</th>
                         </tr>
                       </thead>
                       <tbody>
                         {periodSummaryRows.map((row, idx)=> (
                           <tr key={idx}>
-                            <td style={{fontWeight:700, color:'#0f172a'}}>{row.item}</td>
+                            <td style={{fontWeight:700, color:'#0f172a', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{row.item}</td>
                             <td style={{textAlign:'right', color:'#0f172a', fontWeight:700}}>{row.conference !== 0 ? formatNumber(row.conference) : '-'}</td>
                             <td style={{textAlign:'right', color:'#0f172a', fontWeight:700}}>{row.local !== 0 ? formatNumber(row.local) : '-'}</td>
                             <td style={{textAlign:'right', color:'#0f172a', fontWeight:800}}>{formatNumber(row.total)}</td>
