@@ -84,6 +84,41 @@ def _build_code_map(actor_church: Optional[int]) -> dict:
     return code_map
 
 
+def _build_code_alias_map(actor_church: Optional[int]) -> dict:
+    """Return alias -> canonical column_name for visible collection codes.
+
+    Aliases include: column_name, code, custom_collection_name.
+    """
+    ch = actor_church if actor_church is not None else -1
+    with engine.connect() as conn:
+        result = conn.execute(
+            text(
+                """
+                SELECT column_name, code, custom_collection_name, church
+                FROM collection_codes
+                WHERE church = :ch OR church IS NULL
+                ORDER BY CASE WHEN church = :ch THEN 0 ELSE 1 END, id
+                """
+            ),
+            {'ch': ch},
+        )
+        rows = result.fetchall()
+
+    alias_map: dict = {}
+    for rr in rows:
+        d = dict(rr._mapping)
+        col = str(d.get('column_name') or '').strip().lower()
+        if not col:
+            continue
+        for alias_raw in (d.get('column_name'), d.get('code'), d.get('custom_collection_name')):
+            alias = str(alias_raw or '').strip().lower()
+            if not alias:
+                continue
+            if alias not in alias_map:
+                alias_map[alias] = col
+    return alias_map
+
+
 # ---------------------------------------------------------------------------
 # Hard-coded label overrides
 # These apply when the operator has not yet set the scope field in the DB.
@@ -239,6 +274,10 @@ def compute_period_summary(
     # ---- build code map ---------------------------------------------------
     code_map = _build_code_map(actor_church)
     code_map = _apply_label_overrides(code_map)
+    code_alias_map = _build_code_alias_map(actor_church)
+
+    if not code_map:
+        return empty_result
 
     def _get_info(col_name: str) -> dict:
         return code_map.get(
@@ -284,50 +323,23 @@ def compute_period_summary(
 
         any_rows = True
 
-        # ---- numeric columns for fallback amount lookup -------------------
-        _non_amount_cols = {
-            'id', 'church', 'member_id', 's1', 's2', 's3', 's4',
-            's10', 's11', 's12', 'source', 'notes', 'collection_code',
-            'added_at', 'updated_at',
-        }
-        amount_like_cols = []
-        for c in df.columns:
-            lc = str(c).lower()
-            if lc in _non_amount_cols:
-                continue
-            if lc in code_map:
-                amount_like_cols.append(c)
-                continue
-            if lc in {'s5', 's6', 's7', 's8', 's9', 's13'}:
-                amount_like_cols.append(c)
-                continue
-            if (lc.startswith('c') or lc.startswith('l')) and lc[1:].isdigit():
-                amount_like_cols.append(c)
-                continue
-            if pd.api.types.is_numeric_dtype(df[c]):
-                amount_like_cols.append(c)
-
-        # Preserve order and avoid duplicates.
-        all_numeric_cols = []
-        seen_amount_cols = set()
-        for c in amount_like_cols:
-            if c in seen_amount_cols:
-                continue
-            seen_amount_cols.add(c)
-            all_numeric_cols.append(c)
-
+        # Use only configured collection-code columns to keep categorization accurate.
         mapped_amount_cols = [c for c in code_map.keys() if c in df.columns]
 
         for _, row in df.iterrows():
-            col_name = str(row.get('collection_code') or '').strip()
-            col_lower = col_name.lower() if col_name else ''
+            col_name_raw = str(row.get('collection_code') or '').strip().lower()
+            col_lower = code_alias_map.get(col_name_raw, col_name_raw)
 
-            info = _get_info(col_name) if col_name else None
+            info = code_map.get(col_lower)
             amount = 0.0
 
             # Preferred: read from the dynamic column whose name matches collection_code.
             if col_lower and col_lower in df.columns:
                 amount = _finite_amount(row.get(col_lower))
+
+            # Fallback used by some imports: collection_code is set, amount is in s5.
+            if info is not None and amount == 0.0 and 's5' in df.columns:
+                amount = _finite_amount(row.get('s5'))
 
             # If collection_code is missing (legacy rows), infer item from a mapped amount column.
             if (not col_lower or info is None) and amount == 0.0:
@@ -339,20 +351,9 @@ def compute_period_summary(
                         amount = mv
                         break
 
-            # Generic fallback for rows with sparse/partial data.
-            if amount == 0.0:
-                for nc in all_numeric_cols:
-                    nv = _finite_amount(row.get(nc))
-                    if nv != 0.0:
-                        amount = nv
-                        break
-
-            # If still no code, keep row visible as uncategorized instead of dropping it.
-            if info is None:
-                hint = str(row.get('s10') or row.get('s4') or '').strip()
-                label = hint if hint else 'Uncategorized'
-                info = {'label': label, 'scope': None, 'conf_pct': None, 'church': None}
-                col_lower = f'uncategorized::{label.lower()}'
+            # Report should only include configured collection codes with actual amounts.
+            if info is None or amount == 0.0:
+                continue
 
             conf, local = _split_amount(amount, info['scope'], info['conf_pct'])
 

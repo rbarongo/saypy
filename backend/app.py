@@ -336,7 +336,7 @@ def _ensure_collection_workflow_tables():
                 actor_username VARCHAR(200) NULL,
                 actor_role VARCHAR(80) NULL,
                 details TEXT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         '''))
         conn.execute(text('''
@@ -354,8 +354,8 @@ def _ensure_collection_workflow_tables():
                 approved_by_role VARCHAR(80) NULL,
                 decision_note TEXT NULL,
                 row_snapshot TEXT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                decided_at DATETIME NULL
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                decided_at TIMESTAMP NULL
             )
         '''))
 
