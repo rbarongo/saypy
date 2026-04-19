@@ -3632,12 +3632,13 @@ export default function App(){
             {showMemberForm && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
-                <div style={{marginBottom:10}}>
-                  <label style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:13,color:'#0f172a'}}>
+                <div style={{marginBottom:12}}>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:10,fontSize:14,fontWeight:800,color:'#0b1f3a',background:'#e2e8f0',border:'1px solid #94a3b8',borderRadius:8,padding:'8px 12px'}}>
                     <input
                       type='checkbox'
                       checked={showMemberGroupInfo}
                       onChange={e=>setShowMemberGroupInfo(Boolean(e.target.checked))}
+                      style={{width:18,height:18,accentColor:'#0f2d5c',cursor:'pointer'}}
                     />
                     Show Group Information
                   </label>
@@ -3771,7 +3772,7 @@ export default function App(){
 
                     return (
                       <React.Fragment key={key}>
-                        <label style={{fontSize:13,fontWeight:700,color:'#0f172a',paddingRight:12}}>{memberLabelForColumn(key)}</label>
+                        <label style={{fontSize:14,fontWeight:800,color:'#0b1324',background:'#f1f5f9',border:'1px solid #cbd5e1',borderRadius:6,padding:'8px 10px',lineHeight:1.35,display:'flex',alignItems:'center',paddingRight:12}}>{memberLabelForColumn(key)}</label>
                         <div style={{display:'flex',flexDirection:'column',gap:4}}>
                           {control}
                         </div>
