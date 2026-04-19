@@ -140,6 +140,45 @@ def _finite_amount(value) -> float:
         return 0.0
 
 
+def _parse_bound_date(value: Optional[str], *, end_of_day: bool = False):
+    """Parse API date bound strings with fallback for day-first formats."""
+    if not value:
+        return None
+    dt = pd.to_datetime(value, errors='coerce')
+    if pd.isna(dt):
+        dt = pd.to_datetime(value, errors='coerce', dayfirst=True)
+    if pd.isna(dt):
+        return None
+    if end_of_day:
+        txt = str(value).strip()
+        if len(txt) == 10:
+            dt = dt + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    return dt
+
+
+def _coerce_collection_datetime_series(series: pd.Series) -> pd.Series:
+    """Coerce collection date column from mixed string/numeric formats.
+
+    Handles ISO strings, day-first strings, and Excel serial day numbers.
+    """
+    dt = pd.to_datetime(series, errors='coerce')
+    still_bad = dt.isna()
+
+    if still_bad.any():
+        dt_dayfirst = pd.to_datetime(series, errors='coerce', dayfirst=True)
+        dt = dt.where(~still_bad, dt_dayfirst)
+        still_bad = dt.isna()
+
+    if still_bad.any():
+        numeric = pd.to_numeric(series, errors='coerce')
+        excel_mask = still_bad & numeric.notna() & (numeric > 20000) & (numeric < 90000)
+        if excel_mask.any():
+            excel_dt = pd.to_datetime(numeric[excel_mask], unit='D', origin='1899-12-30', errors='coerce')
+            dt.loc[excel_mask] = excel_dt
+
+    return dt
+
+
 # ---------------------------------------------------------------------------
 # Report: Period Summary
 # ---------------------------------------------------------------------------
@@ -197,16 +236,13 @@ def compute_period_summary(
             df = df[(church_series.isna()) | (church_series == actor_church_num)]
 
     if 's2' in df.columns and (start_date or end_date):
-        df['s2'] = pd.to_datetime(df['s2'], errors='coerce')
-        if start_date:
-            start_dt = pd.to_datetime(start_date, errors='coerce')
-            if start_dt is not pd.NaT:
-                df = df[df['s2'] >= start_dt]
-        if end_date:
-            end_dt = pd.to_datetime(end_date, errors='coerce')
-            if end_dt is not pd.NaT:
-                end_dt = end_dt + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
-                df = df[df['s2'] <= end_dt]
+        df['s2'] = _coerce_collection_datetime_series(df['s2'])
+        start_dt = _parse_bound_date(start_date, end_of_day=False)
+        end_dt = _parse_bound_date(end_date, end_of_day=True)
+        if start_dt is not None:
+            df = df[df['s2'] >= start_dt]
+        if end_dt is not None:
+            df = df[df['s2'] <= end_dt]
 
     empty_result = {
         'start_date': start_date,
