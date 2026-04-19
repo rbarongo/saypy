@@ -43,6 +43,7 @@ from decimal import Decimal
 from datetime import datetime
 import numpy as np
 import math
+import numbers
 import logging
 import io
 import json
@@ -471,6 +472,8 @@ def _serializable_value(v):
         if isinstance(v, datetime):
             return v.isoformat()
         if isinstance(v, Decimal):
+            if not v.is_finite():
+                return None
             try:
                 iv = int(v)
                 if iv == v:
@@ -482,7 +485,14 @@ def _serializable_value(v):
             try:
                 return _serializable_value(v.item())
             except Exception:
-                return float(v)
+                return _serializable_value(float(v))
+        if isinstance(v, numbers.Real) and not isinstance(v, bool):
+            fv = float(v)
+            if not math.isfinite(fv):
+                return None
+            if float(int(fv)) == fv:
+                return int(fv)
+            return fv
         # basic python types are fine
         if isinstance(v, (str, int, float, bool)):
             # guard again for float NaN/Inf
@@ -2210,7 +2220,10 @@ def report_period_summary(
             start_date=start_date,
             end_date=end_date,
         )
-        return _serializable_value(result)
+        safe_result = _serializable_value(result)
+        # Fail-fast locally if any non-finite value escaped sanitation.
+        json.dumps(safe_result, ensure_ascii=True, allow_nan=False, default=str)
+        return safe_result
     except HTTPException:
         raise
     except Exception as e:
