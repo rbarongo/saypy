@@ -2143,12 +2143,19 @@ export default function App(){
     return rows.filter((r)=> safeNumber(r.total) !== 0)
   }
 
+  function isExcludedSummaryLabel(value){
+    const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+    return normalized === 'na' || normalized === 'total' || normalized === 'totals'
+  }
+
   function buildContributorDateItemMatrix(entries, contributorName){
     const target = String(contributorName || '').trim().toLowerCase()
     if(!target) return { columns: [], rows: [], itemColumns: [] }
 
     const filtered = (Array.isArray(entries) ? entries : []).filter((entry)=>{
-      return String(entry?.contributor || '').trim().toLowerCase() === target
+      const sameContributor = String(entry?.contributor || '').trim().toLowerCase() === target
+      if(!sameContributor) return false
+      return !isExcludedSummaryLabel(entry?.item_name)
     })
     if(!filtered.length) return { columns: [], rows: [], itemColumns: [] }
 
@@ -2181,16 +2188,7 @@ export default function App(){
         return out
       })
 
-    const totalsRow = { date: 'TOTAL' }
-    let grandTotal = 0
-    itemColumns.forEach((item)=>{
-      const colTotal = rows.reduce((sum, r)=> sum + safeNumber(r[item]), 0)
-      totalsRow[item] = colTotal
-      grandTotal += colTotal
-    })
-    totalsRow.row_total = grandTotal
-
-    return { columns: ['date', ...itemColumns, 'row_total'], rows: [...rows, totalsRow], itemColumns }
+    return { columns: ['date', ...itemColumns, 'row_total'], rows, itemColumns }
   }
 
   async function fetchPeriodSummary(){
@@ -2444,9 +2442,7 @@ export default function App(){
         entries: grouped[item].count,
       }))
         .filter((row)=>{
-          const key = String(row?.item || '').trim().toLowerCase()
-          const normalized = key.replace(/[^a-z0-9]+/g, '')
-          return normalized !== 'na' && normalized !== 'total'
+          return !isExcludedSummaryLabel(row?.item)
         })
         .sort((a, b)=>{
         const diff = safeNumber(b.total) - safeNumber(a.total)
@@ -2465,7 +2461,7 @@ export default function App(){
     if(activeBuilder === 'contributor_totals'){
       let contributor = String(contributorOverride != null ? contributorOverride : selectedContributorName || '').trim()
       if(!contributor){
-        const firstName = Array.from(new Set((Array.isArray(reportRows) ? reportRows : []).map((r)=> String(r?.s4 || '').trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b))[0] || ''
+        const firstName = Array.from(new Set((Array.isArray(reportRows) ? reportRows : []).map((r)=> String(r?.s4 || '').trim()).filter((name)=> name && !isExcludedSummaryLabel(name)))).sort((a,b)=>a.localeCompare(b))[0] || ''
         contributor = firstName
         if(contributor) setSelectedContributorName(contributor)
       }
@@ -2519,6 +2515,13 @@ export default function App(){
   }
 
   const reportAllColumns = getReportAllColumns(reportRows)
+  const contributorNameOptions = Array.from(
+    new Set(
+      (Array.isArray(reportRows) ? reportRows : [])
+        .map((r)=> String(r?.s4 || '').trim())
+        .filter((name)=> name && !isExcludedSummaryLabel(name))
+    )
+  ).sort((a, b)=> a.localeCompare(b))
 
   useEffect(()=>{
     const all = getReportAllColumns(reportRows)
@@ -4338,10 +4341,20 @@ export default function App(){
                       value={selectedContributorName}
                       onChange={e=>setSelectedContributorName(e.target.value)}
                       placeholder='Select or type contributor name'
-                      style={{minWidth:260}}
+                      style={{minWidth:260, color:'#0f172a', fontWeight:700, background:'#ffffff'}}
                     />
+                    <select
+                      value={selectedContributorName}
+                      onChange={(e)=> setSelectedContributorName(e.target.value)}
+                      style={{minWidth:260, color:'#0f172a', fontWeight:700, background:'#ffffff'}}
+                    >
+                      <option value=''>Choose contributor name</option>
+                      {contributorNameOptions.map((name)=> (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
                     <datalist id='contributor-names-list'>
-                      {Array.from(new Set((Array.isArray(reportRows) ? reportRows : []).map((r)=> String(r?.s4 || '').trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b)).map((name)=> (
+                      {contributorNameOptions.map((name)=> (
                         <option key={name} value={name} />
                       ))}
                     </datalist>
