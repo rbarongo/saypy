@@ -3785,11 +3785,50 @@ export default function App(){
                       )
                     } else if(key==='FAMILY_ID' || key==='family_id' || key==='DEFAULT_FAMILY_ID' || key==='default_family_id' || key==='GROUP_LEADER_ID' || key==='group_leader_id' || key==='DEFAULT_GROUP_LEADER_ID' || key==='default_group_leader_id'){
                       const isGroup = key.toLowerCase().includes('group')
+                      const isDefault = key.toLowerCase().startsWith('default_')
                       const displayControl = (
                         <input placeholder={key} value={val||''} type='number' onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value===''? null: Number(e.target.value) }))} style={{width:'100%'}} />
                       )
-                      const selectedMemberId = val
-                      const selectedMember = selectedMemberId ? (members || []).find(m => m.MEMBER_ID === selectedMemberId) : null
+
+                      // For DEFAULT_FAMILY_ID: auto-default to editing member's own MEMBER_ID if FAMILY_ID is empty
+                      const editingMemberOwnId = Number(memberForm?.MEMBER_ID ?? memberForm?.member_id ?? editingMember?.MEMBER_ID ?? editingMember?.member_id)
+                      const editingMemberFamilyId = Number(memberForm?.FAMILY_ID ?? memberForm?.family_id ?? editingMember?.FAMILY_ID ?? editingMember?.family_id)
+                      const effectiveDefaultVal = (isDefault && !isGroup && !val && !Number.isFinite(editingMemberFamilyId))
+                        ? (Number.isFinite(editingMemberOwnId) && editingMemberOwnId > 0 ? editingMemberOwnId : val)
+                        : val
+
+                      const selectedMemberId = (isDefault && !isGroup) ? effectiveDefaultVal : val
+
+                      // Build filtered options: editing member first, then members with a value in the relevant ID field
+                      const seenFam = new Set()
+                      const famOptions = []
+                      const selfId = Number.isFinite(editingMemberOwnId) && editingMemberOwnId > 0 ? editingMemberOwnId : null
+                      const selfName = String(memberForm?.MEMBER_NAME || memberForm?.member_name || editingMember?.MEMBER_NAME || editingMember?.member_name || '').trim()
+                      if(selfId){
+                        seenFam.add(selfId)
+                        famOptions.push({ value: selfId, label: `${selfName || 'Current Member'} (ID:${selfId})` })
+                      }
+                      ;(members || []).forEach(m=>{
+                        const refRaw = isGroup
+                          ? (m?.GROUP_LEADER_ID ?? m?.group_leader_id)
+                          : (m?.FAMILY_ID ?? m?.family_id)
+                        const refVal = Number(refRaw)
+                        if(!Number.isFinite(refVal) || refVal <= 0) return
+                        if(seenFam.has(refVal)) return
+                        seenFam.add(refVal)
+                        const mName = String(m?.MEMBER_NAME || m?.member_name || '').trim() || 'Unknown'
+                        const mId = m?.MEMBER_ID ?? m?.member_id
+                        const displayId = (mId !== null && mId !== undefined && String(mId).trim() !== '') ? mId : refVal
+                        famOptions.push({ value: refVal, label: `${mName} (ID:${displayId})` })
+                      })
+                      // Fallback: if current saved value not in set, append it
+                      const curNum = Number(selectedMemberId)
+                      if(Number.isFinite(curNum) && curNum > 0 && !seenFam.has(curNum)){
+                        const found = (members || []).find(m => Number(m?.MEMBER_ID ?? m?.member_id) === curNum)
+                        const fbName = String(found?.MEMBER_NAME || found?.member_name || '').trim() || 'Selected'
+                        famOptions.push({ value: curNum, label: `${fbName} (ID:${curNum})` })
+                      }
+
                       mappedDisplay = (
                         <select value={selectedMemberId||''} onChange={e=>{
                           const selected = e.target.value
@@ -3797,8 +3836,8 @@ export default function App(){
                           setMemberForm(prev=>({...prev,[key]: memberId}))
                         }} style={{width:'100%'}}>
                           <option value=''>-- select {isGroup ? 'group leader' : 'family'} --</option>
-                          {(members || []).map(m=> (
-                            <option key={m.id} value={m.MEMBER_ID || ''}>{(m.MEMBER_NAME || '')} (ID: {m.MEMBER_ID || 'N/A'})</option>
+                          {famOptions.map(opt=> (
+                            <option key={`fam-${opt.value}`} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
                       )
