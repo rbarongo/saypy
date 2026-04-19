@@ -3619,11 +3619,12 @@ export default function App(){
             {showMemberForm && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
-                <div style={{display:'grid',gridTemplateColumns:'minmax(180px, 260px) minmax(240px, 1fr)',gap:'10px 12px',alignItems:'center'}}>
+                <div style={{display:'grid',gridTemplateColumns:'minmax(160px, 200px) minmax(220px, 1fr) minmax(220px, 1fr)',gap:'10px 12px',alignItems:'start'}}>
                   {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
                     if(['id','created_at','church','MEMBER_ID','member_id','sno','STATUS_UPDATED_AT'].includes(key)) return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
                     let control = null
+                    let mappedDisplay = null
                     if(key==='STATUS'){
                       control = (
                         <select value={val||''} onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value || null}))} style={{width:'100%'}}>
@@ -3683,6 +3684,26 @@ export default function App(){
                     } else if(key==='TRANSFER_DATE' || key==='transfer_date'){
                       const v = val? new Date(val).toISOString().slice(0,10) : ''
                       control = <input type='date' value={v} onChange={e=> setMemberForm(prev=>({...prev, [key]: e.target.value || null}))} style={{width:'100%'}} />
+                    } else if(key==='FAMILY_ID' || key==='family_id' || key==='GROUP_LEADER_ID' || key==='group_leader_id'){
+                      const isGroup = key.toLowerCase().includes('group')
+                      const displayControl = (
+                        <input placeholder={key} value={val||''} type='number' onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value===''? null: Number(e.target.value) }))} style={{width:'100%'}} />
+                      )
+                      const selectedMemberId = val
+                      const selectedMember = selectedMemberId ? (members || []).find(m => m.MEMBER_ID === selectedMemberId) : null
+                      mappedDisplay = (
+                        <select value={selectedMemberId||''} onChange={e=>{
+                          const selected = e.target.value
+                          const memberId = selected === '' ? null : Number(selected)
+                          setMemberForm(prev=>({...prev,[key]: memberId}))
+                        }} style={{width:'100%'}}>
+                          <option value=''>-- select {isGroup ? 'group leader' : 'family'} --</option>
+                          {(members || []).map(m=> (
+                            <option key={m.id} value={m.MEMBER_ID || ''}>{(m.MEMBER_NAME || '')} (ID: {m.MEMBER_ID || 'N/A'})</option>
+                          ))}
+                        </select>
+                      )
+                      control = displayControl
                     } else {
                       const isNumber = typeof val === 'number' || key.toLowerCase().includes('id') || key.toLowerCase().includes('sno') || key.toLowerCase().includes('pledge')
                       control = (
@@ -3694,6 +3715,7 @@ export default function App(){
                       <React.Fragment key={key}>
                         <label style={{fontSize:13,fontWeight:700,color:'#0f172a'}}>{memberLabelForColumn(key)}</label>
                         {control}
+                        {mappedDisplay || <div />}
                       </React.Fragment>
                     )
                   })}
