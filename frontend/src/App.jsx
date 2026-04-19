@@ -775,6 +775,21 @@ export default function App(){
     }catch(e){}
   }, [user?.id, user?.username, membersFields.join('|')])
 
+  useEffect(()=>{
+    const prefKey = membersCollectionsPrefColumnsKey()
+    if(!prefKey || !membersCollectionsFields.length) return
+    try{
+      const raw = localStorage.getItem(prefKey)
+      if(!raw) return
+      const parsed = JSON.parse(raw)
+      if(Array.isArray(parsed)){
+        const allowed = new Set(getMcAllColumns())
+        const cols = parsed.filter(c=> allowed.has(c))
+        if(cols.length) setMcVisibleCols(cols)
+      }
+    }catch(e){}
+  }, [user?.id, user?.username, membersCollectionsFields.join('|')])
+
   // Load members_collections when navigating to the Members Collections page
   useEffect(()=>{
     if(page==='members_collections'){
@@ -1279,6 +1294,10 @@ export default function App(){
 
   function saveMcColumns(){
     setMcVisibleCols(mcPickerRight)
+    const prefKey = membersCollectionsPrefColumnsKey()
+    if(prefKey){
+      try{ localStorage.setItem(prefKey, JSON.stringify(mcPickerRight)) }catch(e){}
+    }
     setShowMcColumnPicker(false)
   }
   function escapeHtml(value){
@@ -1297,6 +1316,11 @@ export default function App(){
   function membersPrefColumnsKey(){
     const k = membersPrefUserKey()
     return k ? `saypy.members.visibleCols.${k}` : ''
+  }
+
+  function membersCollectionsPrefColumnsKey(){
+    const k = membersPrefUserKey()
+    return k ? `saypy.membersCollections.visibleCols.${k}` : ''
   }
 
   function memberLabelForColumn(col){
@@ -6133,7 +6157,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
         </div>
 
         {showQuickForm && (
-          <div style={{marginTop:12}}>
+          <div className='quick-form-panel' style={{marginTop:12}}>
             {!canManageCollections && <div style={{marginBottom:10, color:'#7c2d12', background:'#fff7ed', border:'1px solid #fdba74', borderRadius:6, padding:8}}>Your account can access Collections but cannot submit entries. Ask an admin to grant Collections management rights.</div>}
             {quickRows.map((row, idx)=> (
               <div key={row.id} style={{border:'1px solid #d1d5db', borderRadius:8, padding:10, marginBottom:10, background:'#fff'}}>

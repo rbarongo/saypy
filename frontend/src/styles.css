@@ -139,3 +139,45 @@ tbody tr:nth-child(odd) td{background:rgba(255,255,255,0.01)}
 
 /* responsive wrap for collections rows */
 .collection-cell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;display:inline-block}
+
+/* Collection quick-form readability and editability on light cards */
+.quick-form-panel label{
+  color:#0f172a !important;
+  font-weight:700;
+}
+
+.quick-form-panel input,
+.quick-form-panel select,
+.quick-form-panel textarea{
+  background:#ffffff !important;
+  color:#0f172a !important;
+  border:1px solid #94a3b8 !important;
+  opacity:1 !important;
+  font-weight:600;
+  pointer-events:auto;
+  position:relative;
+  z-index:1;
+}
+
+.quick-form-panel input::placeholder,
+.quick-form-panel textarea::placeholder{
+  color:#475569 !important;
+  opacity:1;
+}
+
+.quick-form-panel input:focus,
+.quick-form-panel select:focus,
+.quick-form-panel textarea:focus{
+  border-color:#2563eb !important;
+  box-shadow:0 0 0 3px rgba(37,99,235,0.16);
+}
+
+.quick-form-panel input[type='number']{
+  -moz-appearance:textfield;
+}
+
+.quick-form-panel input[type='number']::-webkit-outer-spin-button,
+.quick-form-panel input[type='number']::-webkit-inner-spin-button{
+  -webkit-appearance:none;
+  margin:0;
+}
