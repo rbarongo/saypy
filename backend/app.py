@@ -531,13 +531,31 @@ async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api
     if not target_cols:
         raise HTTPException(status_code=500, detail="members_collection table not found in SQLite. Run migration first.")
 
-    # Case-insensitive column mapping: map df columns to target columns by lowercase matching
-    df_cols_map = {c.lower(): c for c in df.columns}
+    # Case-insensitive direct column mapping.
+    df_cols_map = {str(c).strip().lower(): c for c in df.columns}
+
+    # Apply saved header mappings (header_name -> mapped_column) so Excel/CSV uploads
+    # with user labels still land in canonical members_collection columns.
+    mapped_source_cols = {}
+    try:
+        header_suggestions = get_header_mappings([str(c) for c in df.columns])
+    except Exception:
+        header_suggestions = {}
+    if isinstance(header_suggestions, dict):
+        for src_header, mapped_col in header_suggestions.items():
+            mcol = str(mapped_col or '').strip().lower()
+            sh = str(src_header or '').strip()
+            if not mcol or not sh:
+                continue
+            if sh in df.columns:
+                mapped_source_cols[mcol] = sh
+
     mapped = {}
     for tc in target_cols:
         lc = tc.lower()
-        if lc in df_cols_map:
-            mapped[tc] = df[df_cols_map[lc]]
+        src_col = mapped_source_cols.get(lc) or df_cols_map.get(lc)
+        if src_col is not None:
+            mapped[tc] = df[src_col]
         else:
             mapped[tc] = pd.Series([None] * len(df))
 

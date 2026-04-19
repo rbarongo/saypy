@@ -2070,7 +2070,18 @@ def get_header_mappings(headers: List[str]) -> dict:
     with engine.connect() as conn:
         for h in headers:
             try:
-                res = conn.execute(text('SELECT mapped_column FROM header_mappings WHERE header_name=:h'), {'h': h})
+                res = conn.execute(
+                    text(
+                        '''
+                        SELECT mapped_column
+                        FROM header_mappings
+                        WHERE LOWER(header_name) = LOWER(:h)
+                        ORDER BY CASE WHEN header_name = :h THEN 0 ELSE 1 END
+                        LIMIT 1
+                        '''
+                    ),
+                    {'h': h},
+                )
                 try:
                     mc = res.scalar()
                 except Exception:

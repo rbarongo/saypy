@@ -236,7 +236,12 @@ def compute_period_summary(
             df = df[(church_series.isna()) | (church_series == actor_church_num)]
 
     if 's2' in df.columns and (start_date or end_date):
-        df['s2'] = _coerce_collection_datetime_series(df['s2'])
+        date_series = _coerce_collection_datetime_series(df['s2'])
+        # Uploaded files may miss canonical s2 mapping; fall back to added_at when present.
+        if 'added_at' in df.columns:
+            added_series = _coerce_collection_datetime_series(df['added_at'])
+            date_series = date_series.where(date_series.notna(), added_series)
+        df['s2'] = date_series
         start_dt = _parse_bound_date(start_date, end_of_day=False)
         end_dt = _parse_bound_date(end_date, end_of_day=True)
         if start_dt is not None:
@@ -269,10 +274,31 @@ def compute_period_summary(
         's10', 's11', 's12', 'source', 'notes', 'collection_code',
         'added_at', 'updated_at',
     }
-    all_numeric_cols = [
-        c for c in df.columns
-        if c not in _non_amount_cols and pd.api.types.is_numeric_dtype(df[c])
-    ]
+    amount_like_cols = []
+    for c in df.columns:
+        lc = str(c).lower()
+        if lc in _non_amount_cols:
+            continue
+        if lc in code_map:
+            amount_like_cols.append(c)
+            continue
+        if lc in {'s5', 's6', 's7', 's8', 's9', 's13'}:
+            amount_like_cols.append(c)
+            continue
+        if (lc.startswith('c') or lc.startswith('l')) and lc[1:].isdigit():
+            amount_like_cols.append(c)
+            continue
+        if pd.api.types.is_numeric_dtype(df[c]):
+            amount_like_cols.append(c)
+
+    # Preserve order and avoid duplicates.
+    all_numeric_cols = []
+    seen_amount_cols = set()
+    for c in amount_like_cols:
+        if c in seen_amount_cols:
+            continue
+        seen_amount_cols.add(c)
+        all_numeric_cols.append(c)
 
     # ---- aggregate --------------------------------------------------------
     summary: dict = {}  # col_name_lower → {label, conference, local, total}
