@@ -129,6 +129,17 @@ def _split_amount(amount: float, scope: Optional[str], conf_pct: Optional[float]
     return 0.0, amt
 
 
+def _finite_amount(value) -> float:
+    """Best-effort numeric coercion returning 0.0 for null/non-finite values."""
+    try:
+        amt = float(value)
+        if not math.isfinite(amt):
+            return 0.0
+        return amt
+    except Exception:
+        return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Report: Period Summary
 # ---------------------------------------------------------------------------
@@ -230,37 +241,43 @@ def compute_period_summary(
     # ---- aggregate --------------------------------------------------------
     summary: dict = {}  # col_name_lower → {label, conference, local, total}
 
+    mapped_amount_cols = [c for c in code_map.keys() if c in df.columns]
+
     for _, row in df.iterrows():
         col_name = str(row.get('collection_code') or '').strip()
-        if not col_name:
-            continue
+        col_lower = col_name.lower() if col_name else ''
 
-        info = _get_info(col_name)
-        col_lower = col_name.lower()
-
-        # Preferred: read from the dynamic column whose name matches the code
+        info = _get_info(col_name) if col_name else None
         amount = 0.0
-        if col_lower in df.columns:
-            v = row.get(col_lower)
-            try:
-                amount = float(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else 0.0
-                if not math.isfinite(amount):
-                    amount = 0.0
-            except Exception:
-                amount = 0.0
 
-        # Fallback: first non-zero numeric column in the row
+        # Preferred: read from the dynamic column whose name matches collection_code.
+        if col_lower and col_lower in df.columns:
+            amount = _finite_amount(row.get(col_lower))
+
+        # If collection_code is missing (legacy rows), infer item from a mapped amount column.
+        if (not col_lower or info is None) and amount == 0.0:
+            for mc in mapped_amount_cols:
+                mv = _finite_amount(row.get(mc))
+                if mv != 0.0:
+                    col_lower = mc
+                    info = _get_info(mc)
+                    amount = mv
+                    break
+
+        # Generic fallback for rows with sparse/partial data.
         if amount == 0.0:
             for nc in all_numeric_cols:
-                try:
-                    nv = float(row.get(nc) or 0)
-                    if not math.isfinite(nv):
-                        continue
-                    if nv != 0:
-                        amount = nv
-                        break
-                except Exception:
-                    pass
+                nv = _finite_amount(row.get(nc))
+                if nv != 0.0:
+                    amount = nv
+                    break
+
+        # If still no code, keep row visible as uncategorized instead of dropping it.
+        if info is None:
+            hint = str(row.get('s10') or row.get('s4') or '').strip()
+            label = hint if hint else 'Uncategorized'
+            info = {'label': label, 'scope': None, 'conf_pct': None, 'church': None}
+            col_lower = f'uncategorized::{label.lower()}'
 
         conf, local = _split_amount(amount, info['scope'], info['conf_pct'])
 

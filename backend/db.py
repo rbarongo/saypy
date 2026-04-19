@@ -4,6 +4,7 @@ import binascii
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
+import math
 from urllib.parse import quote_plus
 from datetime import datetime, timedelta
 from typing import List
@@ -272,6 +273,16 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
             if r.get(sk) is not None and not isinstance(r.get(sk), str):
                 r[sk] = str(r.get(sk))
 
+        code_text = str(r.get('collection_code') or '').strip()
+        if code_text == '' or code_text.lower() in {'none', 'nan', 'null'}:
+            code_text = 'uncategorized'
+            r['collection_code'] = code_text
+
+        if r.get('s5') is None and code_text in r:
+            inferred_amount = _coerce_amount(r.get(code_text))
+            if inferred_amount is not None:
+                r['s5'] = inferred_amount
+
         s2dt = _parse_collection_dt(r.get('s2'))
         if s2dt is not None:
             r['s2'] = s2dt
@@ -317,6 +328,134 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
 
         out.append(r)
     return out
+
+
+def _coerce_amount(v) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        if not math.isfinite(f):
+            return None
+        return f
+    except Exception:
+        return None
+
+
+def backfill_members_collection_missing_fields() -> int:
+    """Fill missing collection_code/s5 for existing rows when possible.
+
+    Strategy:
+    - infer collection_code from first non-zero mapped amount column
+    - if s5 is missing, copy inferred amount into s5
+    - if no mapping can be inferred, default collection_code to 'uncategorized'
+    """
+    ensure_db_exists()
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if 'members_collection' not in tables or 'collection_codes' not in tables:
+        return 0
+
+    try:
+        df = pd.read_sql_table('members_collection', con=engine)
+    except Exception:
+        return 0
+    if df.empty or 'id' not in df.columns:
+        return 0
+
+    try:
+        with engine.connect() as conn:
+            code_rows = conn.execute(text(
+                "SELECT church, column_name FROM collection_codes "
+                "WHERE column_name IS NOT NULL AND TRIM(column_name) <> '' "
+                "ORDER BY CASE WHEN church IS NULL THEN 1 ELSE 0 END, id"
+            )).fetchall()
+    except Exception:
+        code_rows = []
+
+    global_codes: List[str] = []
+    church_codes: Dict[int, List[str]] = {}
+    for r in code_rows:
+        ch = _coerce_int(r[0])
+        cn = str(r[1] or '').strip().lower()
+        if not cn:
+            continue
+        if ch is None:
+            if cn not in global_codes:
+                global_codes.append(cn)
+        else:
+            arr = church_codes.setdefault(int(ch), [])
+            if cn not in arr:
+                arr.append(cn)
+
+    present_cols = {str(c).strip().lower() for c in df.columns}
+    updates = []
+
+    for _, row in df.iterrows():
+        rid = _coerce_int(row.get('id'))
+        if rid is None:
+            continue
+
+        code_raw = str(row.get('collection_code') or '').strip()
+        code_missing = code_raw == '' or code_raw.lower() in {'none', 'nan', 'null'}
+        s5_current = _coerce_amount(row.get('s5'))
+        s5_missing = s5_current is None
+        if not code_missing and not s5_missing:
+            continue
+
+        ch = _coerce_int(row.get('church'))
+        candidates = []
+        if ch is not None:
+            candidates.extend(church_codes.get(int(ch), []))
+        candidates.extend(global_codes)
+
+        # Keep candidate order but remove duplicates.
+        seen = set()
+        dedup_candidates = []
+        for c in candidates:
+            if c in seen:
+                continue
+            seen.add(c)
+            dedup_candidates.append(c)
+
+        inferred_code = None
+        inferred_amount = None
+        for c in dedup_candidates:
+            if c not in present_cols:
+                continue
+            av = _coerce_amount(row.get(c))
+            if av is None or av == 0:
+                continue
+            inferred_code = c
+            inferred_amount = av
+            break
+
+        new_code = code_raw
+        new_s5 = s5_current
+        changed = False
+
+        if code_missing:
+            new_code = inferred_code or 'uncategorized'
+            changed = True
+
+        if s5_missing and inferred_amount is not None:
+            new_s5 = inferred_amount
+            changed = True
+
+        if changed:
+            updates.append({'id': int(rid), 'collection_code': str(new_code), 's5': new_s5})
+
+    if not updates:
+        return 0
+
+    with engine.begin() as conn:
+        for u in updates:
+            conn.execute(
+                text('UPDATE members_collection SET collection_code=:cc, s5=:s5 WHERE id=:id'),
+                {'cc': u['collection_code'], 's5': u['s5'], 'id': u['id']}
+            )
+
+    return len(updates)
 
 
 def backfill_members_collection_identifiers() -> int:
@@ -645,6 +784,11 @@ def create_tables():
 
     try:
         backfill_members_collection_identifiers()
+    except Exception:
+        pass
+
+    try:
+        backfill_members_collection_missing_fields()
     except Exception:
         pass
 
