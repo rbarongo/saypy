@@ -1294,8 +1294,8 @@ export default function App(){
       family_id: 'Family',
       DEFAULT_FAMILY_ID: 'Default Family',
       default_family_id: 'Default Family',
-      OFFICIAL_MEMBER_ID: 'Unique Member ID',
-      official_member_id: 'Unique Member ID',
+      OFFICIAL_MEMBER_ID: 'Unique Identity',
+      official_member_id: 'Unique Identity',
       GROUP_NAME: 'Group Name',
       group_name: 'Group Name',
       GROUP_ALIAS: 'Group Alias',
@@ -1336,6 +1336,14 @@ export default function App(){
     if(!row) return ''
     if(k === 'church'){
       return (churches||[]).find(c=> Number(c.id)===Number(row?.church))?.name || row?.church || ''
+    }
+    if(k === 'MEMBER_NAME' || k === 'member_name'){
+      const name = row?.MEMBER_NAME || row?.member_name || ''
+      const idVal = row?.MEMBER_ID ?? row?.member_id
+      if(idVal !== null && idVal !== undefined && String(idVal).trim() !== ''){
+        return `${name} (ID:${idVal})`
+      }
+      return String(name)
     }
     const v = row[k]
     return v===null||v===undefined ? '' : String(v)
@@ -3726,15 +3734,48 @@ export default function App(){
                         <input placeholder={key} value={val||''} type='number' onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value===''? null: Number(e.target.value) }))} style={{width:'100%'}} />
                       )
                       const selectedMemberId = val
+                      const selectedMemberIdentity = Number(selectedMemberId)
+                      const selectedMemberProfileIdRaw = memberForm?.MEMBER_ID ?? memberForm?.member_id ?? editingMember?.MEMBER_ID ?? editingMember?.member_id
+                      const selectedMemberProfileId = Number(selectedMemberProfileIdRaw)
+                      const selectedMemberName = String(memberForm?.MEMBER_NAME || memberForm?.member_name || editingMember?.MEMBER_NAME || editingMember?.member_name || '').trim()
+                      const seenIdentity = new Set()
+                      const identityOptions = []
+
+                      if(Number.isFinite(selectedMemberProfileId) && selectedMemberProfileId > 0){
+                        seenIdentity.add(selectedMemberProfileId)
+                        identityOptions.push({
+                          value: selectedMemberProfileId,
+                          label: `${selectedMemberName || 'Selected Member'} (ID:${selectedMemberProfileId})`,
+                        })
+                      }
+
+                      ;(members || []).forEach(m=>{
+                        const uniqueRaw = m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id
+                        const uniqueVal = Number(uniqueRaw)
+                        if(!Number.isFinite(uniqueVal) || uniqueVal <= 0) return
+                        if(seenIdentity.has(uniqueVal)) return
+                        seenIdentity.add(uniqueVal)
+                        const memberName = String(m?.MEMBER_NAME || m?.member_name || '').trim() || 'Unknown Member'
+                        const memberId = m?.MEMBER_ID ?? m?.member_id
+                        const displayId = (memberId !== null && memberId !== undefined && String(memberId).trim() !== '') ? memberId : uniqueVal
+                        identityOptions.push({ value: uniqueVal, label: `${memberName} (ID:${displayId})` })
+                      })
+
+                      if(Number.isFinite(selectedMemberIdentity) && selectedMemberIdentity > 0 && !seenIdentity.has(selectedMemberIdentity)){
+                        const found = (members || []).find(m => Number(m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id) === selectedMemberIdentity || Number(m?.MEMBER_ID ?? m?.member_id) === selectedMemberIdentity)
+                        const fallbackName = String(found?.MEMBER_NAME || found?.member_name || '').trim() || 'Selected Identity'
+                        identityOptions.push({ value: selectedMemberIdentity, label: `${fallbackName} (ID:${selectedMemberIdentity})` })
+                      }
+
                       mappedDisplay = (
                         <select value={selectedMemberId||''} onChange={e=>{
                           const selected = e.target.value
                           const memberId = selected === '' ? null : Number(selected)
                           setMemberForm(prev=>({...prev,[key]: memberId}))
                         }} style={{width:'100%'}}>
-                          <option value=''>-- select unique member --</option>
-                          {(members || []).map(m=> (
-                            <option key={m.id} value={m.MEMBER_ID || ''}>{(m.MEMBER_NAME || '')} (ID: {m.MEMBER_ID || 'N/A'})</option>
+                          <option value=''>-- select unique identity --</option>
+                          {identityOptions.map(opt=> (
+                            <option key={`uid-${opt.value}`} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
                       )
@@ -3779,22 +3820,22 @@ export default function App(){
                   })
                   })()}
                 </div>
-                <div style={{marginTop:8,marginBottom:8,display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
-                  <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12,fontWeight:600,color:'#0f172a'}}>
+                <div style={{marginTop:8,marginBottom:8,display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:14,fontWeight:800,color:'#0b1f3a',background:'#e2e8f0',border:'1px solid #94a3b8',borderRadius:6,padding:'6px 10px'}}>
                     <input
                       type='checkbox'
                       checked={showMemberGroupInfo}
                       onChange={e=>setShowMemberGroupInfo(Boolean(e.target.checked))}
-                      style={{width:14,height:14,accentColor:'#0f2d5c',cursor:'pointer'}}
+                      style={{width:16,height:16,accentColor:'#0f2d5c',cursor:'pointer'}}
                     />
                     Show Group Information
                   </label>
-                  <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12,fontWeight:600,color:'#0f172a'}}>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:14,fontWeight:800,color:'#0b1f3a',background:'#e2e8f0',border:'1px solid #94a3b8',borderRadius:6,padding:'6px 10px'}}>
                     <input
                       type='checkbox'
                       checked={showMembershipInfo}
                       onChange={e=>setShowMembershipInfo(Boolean(e.target.checked))}
-                      style={{width:14,height:14,accentColor:'#0f2d5c',cursor:'pointer'}}
+                      style={{width:16,height:16,accentColor:'#0f2d5c',cursor:'pointer'}}
                     />
                     Show Membership Information
                   </label>
