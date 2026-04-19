@@ -4019,7 +4019,7 @@ export default function App(){
               return (
                 <div style={{marginTop:12,border:'2px solid #3b82f6',borderRadius:8,padding:14,background:'#f8fbff'}}>
                   <h4 style={{margin:'0 0 10px',color:'#1e3a8a',fontSize:20,fontWeight:800}}>Map Member — Unique Identity for: <strong>{targetName}</strong></h4>
-                  <p style={{fontSize:14,lineHeight:1.5,color:'#334155',margin:'0 0 10px',fontWeight:600}}>Filter and transfer members to the right. Then click one name on the right to designate it as the <strong>Unique Identity</strong> (OFFICIAL_MEMBER_ID). All right-side members will be linked to that identity.</p>
+                  <p style={{fontSize:14,lineHeight:1.5,color:'#334155',margin:'0 0 10px',fontWeight:600}}>Filter and transfer members to the right. Then click one name on the right to designate it as the <strong>Unique Identity</strong>. All selected members will be updated so both <strong>MEMBER_ID</strong> and <strong>OFFICIAL_MEMBER_ID</strong> use that designated member ID.</p>
                   <div style={{display:'flex',gap:8,marginBottom:8,alignItems:'center'}}>
                     <input placeholder='Filter members by name...' value={mapFilter} onChange={e=>setMapFilter(e.target.value)} style={{flex:1,padding:'8px 10px',fontSize:14,color:'#0f172a',border:'1px solid #94a3b8',borderRadius:6}} />
                     <button onClick={()=>setMapFilter('')} style={{fontSize:13,fontWeight:700,padding:'8px 12px'}}>Clear</button>
@@ -4079,15 +4079,21 @@ export default function App(){
                       onClick={async ()=>{
                         try{
                           const des = mapRight.find(r=>r.id===mapDesignated)
-                          const desOfficialId = Number(des?.MEMBER_ID||des?.member_id||0)
-                          if(!desOfficialId){ setStatus('Designated member has no MEMBER_ID'); return; }
+                          const designatedMemberId = Number(des?.MEMBER_ID||des?.member_id||0)
+                          if(!designatedMemberId){ setStatus('Designated member has no MEMBER_ID'); return; }
                           let ok=0
                           for(const m of mapRight){
-                            const payload = {...m, OFFICIAL_MEMBER_ID: desOfficialId}
+                            const payload = {
+                              ...m,
+                              MEMBER_ID: designatedMemberId,
+                              member_id: designatedMemberId,
+                              OFFICIAL_MEMBER_ID: designatedMemberId,
+                              official_member_id: designatedMemberId,
+                            }
                             const res = await authFetch(`http://localhost:8000/members/${m.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
                             if(res.ok) ok++
                           }
-                          setStatus(`Map Member saved: ${ok}/${mapRight.length} updated with OFFICIAL_MEMBER_ID=${desOfficialId}`)
+                          setStatus(`Map Member saved: ${ok}/${mapRight.length} updated with MEMBER_ID=${designatedMemberId} and OFFICIAL_MEMBER_ID=${designatedMemberId}`)
                           setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null)
                           await fetchMembers('')
                         }catch(e){ setStatus('Map Member save failed: '+e.message) }
@@ -4117,7 +4123,7 @@ export default function App(){
               return (
                 <div style={{marginTop:12,border:'2px solid #16a34a',borderRadius:8,padding:14,background:'#f8fff9'}}>
                   <h4 style={{margin:'0 0 10px',color:'#166534',fontSize:20,fontWeight:800}}>Map Families — Family Group for: <strong>{targetName}</strong></h4>
-                  <p style={{fontSize:14,lineHeight:1.5,color:'#334155',margin:'0 0 10px',fontWeight:600}}>Filter and transfer members to the right. Then click one name on the right to designate as <strong>Family Name</strong> (FAMILY_ID). All right-side members will share that family group. LHS shows unique-identified members{uniquePool.length===0?' (none found — showing all members)':''}.</p>
+                  <p style={{fontSize:14,lineHeight:1.5,color:'#334155',margin:'0 0 10px',fontWeight:600}}>Filter and transfer members to the right. Then click one name on the right to designate as <strong>Family Name</strong>. All selected members will be updated so <strong>FAMILY_ID</strong> and <strong>DEFAULT_FAMILY_ID</strong> use that designated family member ID. LHS shows unique-identified members{uniquePool.length===0?' (none found — showing all members)':''}.</p>
                   <div style={{display:'flex',gap:8,marginBottom:8,alignItems:'center'}}>
                     <input placeholder='Filter members by name...' value={mapFilter} onChange={e=>setMapFilter(e.target.value)} style={{flex:1,padding:'8px 10px',fontSize:14,color:'#0f172a',border:'1px solid #94a3b8',borderRadius:6}} />
                     <button onClick={()=>setMapFilter('')} style={{fontSize:13,fontWeight:700,padding:'8px 12px'}}>Clear</button>
