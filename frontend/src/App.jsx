@@ -2158,7 +2158,32 @@ export default function App(){
     }
   }
 
-  function buildSelectedReport(){
+  async function buildSelectedReport(){
+    if(selectedReportBuilder === 'daily_totals'){
+      try{
+        let url = 'http://localhost:8000/reports/daily_summary'
+        const params = []
+        if(reportFrom) params.push(`start_date=${encodeURIComponent(reportFrom)}`)
+        if(reportTo) params.push(`end_date=${encodeURIComponent(reportTo)}`)
+        if(params.length) url += `?${params.join('&')}`
+        const res = await authFetch(url)
+        const data = await res.json().catch(()=> ({}))
+        if(!res.ok) throw new Error(data?.detail || JSON.stringify(data))
+        const rows = Array.isArray(data?.rows) ? data.rows : []
+        const outWithTotal = appendGroupedTotalsRow(rows, 'date')
+        setBuiltReportColumns(['date', 'conference', 'local', 'total'])
+        setBuiltReportRows(outWithTotal)
+        setMeetingSummaryRows([])
+        setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+        setStatus('Daily totals report built successfully.')
+      }catch(e){
+        setBuiltReportRows([])
+        setBuiltReportColumns([])
+        setStatus('Daily totals report failed: ' + (e?.message || String(e)))
+      }
+      return
+    }
+
     const entries = buildReportEntries()
     if(!entries.length){
       setBuiltReportRows([])
@@ -2193,32 +2218,6 @@ export default function App(){
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus(`Detailed entries report built successfully (${out.length} rows).`)
-      return
-    }
-
-    if(selectedReportBuilder === 'daily_totals'){
-      let out = buildDailyTotalsFromCollectionFields(reportRows)
-      if(!out.length){
-        const grouped = groupAndSum(entries, e=> e.date || 'Unknown date')
-        const orderedKeys = Object.keys(grouped).sort((a, b)=>{
-          if(a === 'Unknown date' && b !== 'Unknown date') return 1
-          if(b === 'Unknown date' && a !== 'Unknown date') return -1
-          return String(a).localeCompare(String(b))
-        })
-        out = orderedKeys.map(date=> ({
-          date,
-          local: grouped[date].local,
-          conference: grouped[date].conference,
-          total: grouped[date].total,
-          entries: grouped[date].count,
-        }))
-      }
-      const outWithTotal = appendGroupedTotalsRow(out, 'date')
-      setBuiltReportColumns(['date', 'conference', 'local', 'total'])
-      setBuiltReportRows(outWithTotal)
-      setMeetingSummaryRows([])
-      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
-      setStatus('Daily totals report built successfully.')
       return
     }
 

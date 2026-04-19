@@ -417,3 +417,137 @@ def compute_period_summary(
         'rows':       out_rows,
         'totals':     totals,
     }
+
+
+def compute_daily_summary(
+    actor_church: Optional[int],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
+    """Aggregate collection entries by date using the same split rules as period summary."""
+    empty_result = {
+        'start_date': start_date,
+        'end_date': end_date,
+        'rows': [],
+        'totals': {'conference': 0.0, 'local': 0.0, 'total': 0.0},
+    }
+
+    code_map = _build_code_map(actor_church)
+    code_map = _apply_label_overrides(code_map)
+    code_map = {
+        k: v for k, v in code_map.items()
+        if _is_reportable_code(k, v.get('label'))
+    }
+    code_alias_map = _build_code_alias_map(actor_church)
+    code_alias_map = {k: v for k, v in code_alias_map.items() if v in code_map}
+
+    if not code_map:
+        return empty_result
+
+    start_dt = _parse_bound_date(start_date, end_of_day=False)
+    end_dt = _parse_bound_date(end_date, end_of_day=True)
+
+    totals_by_day_and_code: dict = {}
+    any_rows = False
+
+    for df in _iter_members_collection_chunks(chunk_size=5000):
+        if df is None or df.empty:
+            continue
+
+        if actor_church is not None and 'church' in df.columns:
+            try:
+                actor_church_num = int(actor_church)
+            except Exception:
+                actor_church_num = None
+            if actor_church_num is not None:
+                church_series = pd.to_numeric(df['church'], errors='coerce')
+                df = df[(church_series.isna()) | (church_series == actor_church_num)]
+
+        date_series = pd.Series([pd.NaT] * len(df), index=df.index)
+        if 's2' in df.columns:
+            date_series = _coerce_collection_datetime_series(df['s2'])
+        if 'added_at' in df.columns:
+            added_series = _coerce_collection_datetime_series(df['added_at'])
+            date_series = date_series.where(date_series.notna(), added_series)
+
+        if start_dt is not None:
+            df = df[date_series >= start_dt]
+            date_series = date_series.loc[df.index]
+        if end_dt is not None:
+            df = df[date_series <= end_dt]
+            date_series = date_series.loc[df.index]
+
+        if df.empty:
+            continue
+
+        any_rows = True
+
+        if 'collection_code' in df.columns:
+            resolved_code = df['collection_code'].apply(
+                lambda v: code_alias_map.get(str(v or '').strip().lower(), str(v or '').strip().lower())
+            )
+        else:
+            resolved_code = pd.Series([''] * len(df), index=df.index)
+
+        s5_series = _safe_numeric_series(df, 's5')
+        day_key_series = date_series.dt.strftime('%Y-%m-%d').fillna('Unknown date')
+
+        for code in code_map.keys():
+            col_series = _safe_numeric_series(df, code)
+            amount_series = col_series.copy()
+
+            if 's5' in df.columns:
+                match_code = (resolved_code == code)
+                use_s5 = match_code & (col_series == 0)
+                amount_series = amount_series + s5_series.where(use_s5, 0.0)
+
+            if float(amount_series.sum()) == 0.0:
+                continue
+
+            grouped = amount_series.groupby(day_key_series).sum()
+            for day_key, amt in grouped.items():
+                if day_key not in totals_by_day_and_code:
+                    totals_by_day_and_code[day_key] = {}
+                totals_by_day_and_code[day_key][code] = totals_by_day_and_code[day_key].get(code, 0.0) + float(amt)
+
+    if not any_rows:
+        return empty_result
+
+    def _day_sort_key(v):
+        t = str(v or '')
+        if t == 'Unknown date':
+            return (1, t)
+        return (0, t)
+
+    out_rows = []
+    for day_key in sorted(totals_by_day_and_code.keys(), key=_day_sort_key):
+        local_total = 0.0
+        conf_total = 0.0
+        grand_total = 0.0
+        for code, amount in (totals_by_day_and_code.get(day_key) or {}).items():
+            info = code_map.get(code) or {}
+            conf_amt, local_amt = _split_amount(float(amount or 0.0), info.get('scope'), info.get('conf_pct'))
+            conf_total += conf_amt
+            local_total += local_amt
+            grand_total += float(amount or 0.0)
+        if grand_total == 0.0:
+            continue
+        out_rows.append({
+            'date': day_key,
+            'conference': round(conf_total, 2),
+            'local': round(local_total, 2),
+            'total': round(grand_total, 2),
+        })
+
+    totals = {
+        'conference': round(sum(r['conference'] for r in out_rows), 2),
+        'local': round(sum(r['local'] for r in out_rows), 2),
+        'total': round(sum(r['total'] for r in out_rows), 2),
+    }
+
+    return {
+        'start_date': start_date,
+        'end_date': end_date,
+        'rows': out_rows,
+        'totals': totals,
+    }

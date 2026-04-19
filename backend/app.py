@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import binascii
 import pandas as pd
-from .reports import compute_period_summary
+from .reports import compute_period_summary, compute_daily_summary
 from .db import (
     get_target_columns,
     insert_dataframe,
@@ -2260,6 +2260,34 @@ def report_period_summary(
         )
         safe_result = _serializable_value(result)
         # Fail-fast locally if any non-finite value escaped sanitation.
+        json.dumps(safe_result, ensure_ascii=True, allow_nan=False, default=str)
+        return safe_result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/reports/daily_summary')
+def report_daily_summary(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    auth: dict = Depends(require_api_key_or_user),
+):
+    """Daily summary report — per-date conference/local/total using period summary rules."""
+    _require_auth_any_right(
+        auth,
+        {'can_manage_members_collections', 'can_view_reports'},
+        context='daily summary report',
+    )
+    actor_church = _auth_context_church(auth)
+    try:
+        result = compute_daily_summary(
+            actor_church=actor_church,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        safe_result = _serializable_value(result)
         json.dumps(safe_result, ensure_ascii=True, allow_nan=False, default=str)
         return safe_result
     except HTTPException:
