@@ -1820,6 +1820,15 @@ export default function App(){
     return isConference ? 'conference' : 'local'
   }
 
+  function splitRuleForItem(itemLabel, itemCode = ''){
+    const text = `${String(itemLabel || '').toLowerCase()} ${String(itemCode || '').toLowerCase()}`
+    // Business rule: Sadaka and Shukrani are split 58% conference / 42% local.
+    if(text.includes('sadaka') || text.includes('shukrani')){
+      return { conferencePct: 58, localPct: 42 }
+    }
+    return null
+  }
+
   function buildReportEntries(){
     const rows = Array.isArray(reportRows) ? reportRows : []
     const defs = getScopedCollectionCodeDefs()
@@ -1847,14 +1856,32 @@ export default function App(){
         if(amount === 0) return
         addedFromCodes = true
         const itemLabel = String(def?.custom_collection_name || def?.code || def?.column_name || col)
-        const category = categorizeContribution(itemLabel)
-        out.push({
-          ...common,
-          item_code: col,
-          item_name: itemLabel,
-          category,
-          amount,
-        })
+        const split = splitRuleForItem(itemLabel, col)
+        if(split){
+          out.push({
+            ...common,
+            item_code: col,
+            item_name: itemLabel,
+            category: 'conference',
+            amount: amount * (Number(split.conferencePct || 0) / 100),
+          })
+          out.push({
+            ...common,
+            item_code: col,
+            item_name: itemLabel,
+            category: 'local',
+            amount: amount * (Number(split.localPct || 0) / 100),
+          })
+        }else{
+          const category = categorizeContribution(itemLabel)
+          out.push({
+            ...common,
+            item_code: col,
+            item_name: itemLabel,
+            category,
+            amount,
+          })
+        }
       })
 
       // Fallback for data shapes where a single value is provided outside code columns.
@@ -1864,14 +1891,32 @@ export default function App(){
         const amount = inferRowAmount(row)
         if(amount !== 0){
           const itemLabel = itemCode ? labelForCollectionCode(itemCode) : 'Unknown'
-          const category = categorizeContribution(itemLabel)
-          out.push({
-            ...common,
-            item_code: itemCode,
-            item_name: itemLabel,
-            category,
-            amount,
-          })
+          const split = splitRuleForItem(itemLabel, itemCode)
+          if(split){
+            out.push({
+              ...common,
+              item_code: itemCode,
+              item_name: itemLabel,
+              category: 'conference',
+              amount: amount * (Number(split.conferencePct || 0) / 100),
+            })
+            out.push({
+              ...common,
+              item_code: itemCode,
+              item_name: itemLabel,
+              category: 'local',
+              amount: amount * (Number(split.localPct || 0) / 100),
+            })
+          }else{
+            const category = categorizeContribution(itemLabel)
+            out.push({
+              ...common,
+              item_code: itemCode,
+              item_name: itemLabel,
+              category,
+              amount,
+            })
+          }
         }
       }
     })
@@ -1891,9 +1936,38 @@ export default function App(){
     return grouped
   }
 
+  function isContributionCollectionDef(def){
+    const text = [
+      def?.custom_collection_name,
+      def?.code,
+      def?.column_name,
+    ].map(v=> String(v || '').trim().toLowerCase())
+
+    const blocked = new Set([
+      'sno',
+      'nambari ya risiti',
+      'details2',
+      'jumla',
+      'na',
+      'total',
+      'receipt',
+      'receipt no',
+      'receipt number',
+      'serial',
+      'serial no',
+      'date',
+      'tarehe',
+      'name',
+      'jina',
+      'details',
+    ])
+
+    return !text.some((t)=> t && blocked.has(t))
+  }
+
   function getScopedCollectionCodeDefs(){
     const defs = Array.isArray(collectionCodes) ? collectionCodes : []
-    const scoped = defs.filter((c)=> c && c.column_name)
+    const scoped = defs.filter((c)=> c && c.column_name && isContributionCollectionDef(c))
     const preferredByColumn = new Map()
     scoped.forEach((c)=>{
       const key = String(c.column_name || '').trim().toLowerCase()
@@ -1944,6 +2018,13 @@ export default function App(){
         const amount = safeNumber(row?.[col])
         if(amount === 0) return
         rowHasAmount = true
+        const split = splitRuleForItem(def?.custom_collection_name || def?.code || def?.column_name, col)
+        if(split){
+          grouped[dayKey].conference += amount * (Number(split.conferencePct || 0) / 100)
+          grouped[dayKey].local += amount * (Number(split.localPct || 0) / 100)
+          grouped[dayKey].total += amount
+          return
+        }
         const cfg = normalizeScopeConfig(def?.scope, def?.conference_split_pct)
         if(cfg.mode === 'conference'){
           grouped[dayKey].conference += amount
@@ -1964,7 +2045,11 @@ export default function App(){
         if(fallbackAmount !== 0){
           const rowCode = String(row?.collection_code || '').trim().toLowerCase()
           const matchedDef = defByKey.get(rowCode)
-          if(matchedDef){
+          const split = splitRuleForItem(labelForCollectionCode(row?.collection_code), rowCode)
+          if(split){
+            grouped[dayKey].conference += fallbackAmount * (Number(split.conferencePct || 0) / 100)
+            grouped[dayKey].local += fallbackAmount * (Number(split.localPct || 0) / 100)
+          }else if(matchedDef){
             const cfg = normalizeScopeConfig(matchedDef?.scope, matchedDef?.conference_split_pct)
             if(cfg.mode === 'conference'){
               grouped[dayKey].conference += fallbackAmount
