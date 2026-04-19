@@ -254,6 +254,13 @@ def _iter_members_collection_chunks(chunk_size: int = 5000):
     yield from pd.read_sql_query(query, con=engine, chunksize=chunk_size)
 
 
+def _safe_numeric_series(df: pd.DataFrame, col_name: str) -> pd.Series:
+    if col_name in df.columns:
+        s = pd.to_numeric(df[col_name], errors='coerce').fillna(0.0)
+        return s.where(pd.Series([math.isfinite(float(v)) for v in s], index=s.index), 0.0)
+    return pd.Series([0.0] * len(df), index=df.index, dtype='float64')
+
+
 # ---------------------------------------------------------------------------
 # Report: Period Summary
 # ---------------------------------------------------------------------------
@@ -318,14 +325,8 @@ def compute_period_summary(
     if not code_map:
         return empty_result
 
-    def _get_info(col_name: str) -> dict:
-        return code_map.get(
-            str(col_name or '').lower().strip(),
-            {'label': str(col_name), 'scope': None, 'conf_pct': None, 'church': None},
-        )
-
     # ---- aggregation state -------------------------------------------------
-    summary: dict = {}  # col_name_lower → {label, conference, local, total}
+    totals_by_code = {code: 0.0 for code in code_map.keys()}
     any_rows = False
 
     start_dt = _parse_bound_date(start_date, end_of_day=False)
@@ -362,64 +363,46 @@ def compute_period_summary(
 
         any_rows = True
 
-        # Use only configured collection-code columns to keep categorization accurate.
-        mapped_amount_cols = [c for c in code_map.keys() if c in df.columns]
+        # Resolve collection_code values to canonical code keys.
+        if 'collection_code' in df.columns:
+            resolved_code = df['collection_code'].apply(
+                lambda v: code_alias_map.get(str(v or '').strip().lower(), str(v or '').strip().lower())
+            )
+        else:
+            resolved_code = pd.Series([''] * len(df), index=df.index)
 
-        for _, row in df.iterrows():
-            col_name_display = str(row.get('collection_code') or '').strip()
-            col_name_raw = col_name_display.lower()
-            col_lower = code_alias_map.get(col_name_raw, col_name_raw)
+        s5_series = _safe_numeric_series(df, 's5')
 
-            info = code_map.get(col_lower)
-            amount = 0.0
+        # Aggregate strictly by configured collection codes.
+        for code in code_map.keys():
+            col_series = _safe_numeric_series(df, code)
+            chunk_total = float(col_series.sum())
 
-            # Preferred: read from the dynamic column whose name matches collection_code.
-            if col_lower and col_lower in df.columns:
-                amount = _finite_amount(row.get(col_lower))
+            # Form submissions often keep amount in s5 while collection_code points to the item.
+            if 's5' in df.columns:
+                match_code = (resolved_code == code)
+                # Avoid double count when the code column itself already carries amount.
+                use_s5 = match_code & (col_series == 0)
+                chunk_total += float(s5_series[use_s5].sum())
 
-            # Fallback used by some imports: amount is in s5.
-            if amount == 0.0 and 's5' in df.columns:
-                amount = _finite_amount(row.get('s5'))
-
-            # If collection_code is missing (legacy rows), infer item from a mapped contribution column.
-            if (not col_lower or info is None) and amount == 0.0:
-                for mc in mapped_amount_cols:
-                    mv = _finite_amount(row.get(mc))
-                    if mv != 0.0:
-                        col_lower = mc
-                        info = _get_info(mc)
-                        amount = mv
-                        break
-
-            # If no configured mapping exists, display collection_code as-is.
-            if info is None and col_name_display and not _is_total_like(col_name_display):
-                info = {'label': col_name_display, 'scope': None, 'conf_pct': None, 'church': None}
-                col_lower = f'raw::{col_name_display.lower()}'
-
-            if info is None or amount == 0.0:
-                continue
-
-            conf, local = _split_amount(amount, info['scope'], info['conf_pct'])
-
-            key = col_lower
-            if key not in summary:
-                summary[key] = {'label': info['label'], 'conference': 0.0, 'local': 0.0, 'total': 0.0}
-            summary[key]['conference'] += conf
-            summary[key]['local'] += local
-            summary[key]['total'] += float(amount)
+            totals_by_code[code] = totals_by_code.get(code, 0.0) + chunk_total
 
     if not any_rows:
         return empty_result
 
     # ---- format output ----------------------------------------------------
     out_rows = []
-    for k in sorted(summary, key=lambda x: summary[x]['label'].lower()):
-        s = summary[k]
+    for k in sorted(code_map, key=lambda x: str(code_map[x].get('label') or x).lower()):
+        amount = float(totals_by_code.get(k, 0.0) or 0.0)
+        if amount == 0.0:
+            continue
+        info = code_map[k]
+        conf_amt, local_amt = _split_amount(amount, info.get('scope'), info.get('conf_pct'))
         out_rows.append({
-            'item':       s['label'],
-            'conference': round(s['conference'], 2),
-            'local':      round(s['local'], 2),
-            'total':      round(s['total'], 2),
+            'item':       str(info.get('label') or k),
+            'conference': round(conf_amt, 2),
+            'local':      round(local_amt, 2),
+            'total':      round(amount, 2),
         })
 
     totals = {
