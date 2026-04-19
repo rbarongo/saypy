@@ -1568,11 +1568,28 @@ export default function App(){
     return String(v).trim() !== ''
   }
 
+  function shouldHideMembersReportColumn(col){
+    const key = String(col || '').trim().toLowerCase()
+    return new Set([
+      'id',
+      'collection_code',
+      'church',
+      's1',
+      'sno',
+      'tarehe',
+      'is_locked',
+      'locked_at',
+      'unlocked_at',
+      'collection_entry_method',
+      'entry_method',
+    ]).has(key)
+  }
+
   function getReportVisibleColumns(rows){
     const arr = Array.isArray(rows) ? rows : []
     if(!arr.length) return []
     const first = arr[0] || {}
-    const ordered = Object.keys(first)
+    const ordered = Object.keys(first).filter((col)=> !shouldHideMembersReportColumn(col))
     const visible = ordered.filter((col)=> arr.some((row)=> hasReportCellData(row?.[col])))
     return visible.length ? visible : ordered
   }
@@ -1584,7 +1601,7 @@ export default function App(){
     const seen = new Set()
     arr.forEach((row)=>{
       Object.keys(row || {}).forEach((col)=>{
-        if(!seen.has(col)){
+        if(!seen.has(col) && !shouldHideMembersReportColumn(col)){
           seen.add(col)
           ordered.push(col)
         }
