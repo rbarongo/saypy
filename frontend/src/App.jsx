@@ -1500,6 +1500,12 @@ export default function App(){
   const [periodSummaryFrom, setPeriodSummaryFrom] = useState('')
   const [periodSummaryTo, setPeriodSummaryTo] = useState('')
   const [reportShowOnlyDataColumns, setReportShowOnlyDataColumns] = useState(true)
+  const [reportVisibleCols, setReportVisibleCols] = useState([])
+  const [showReportColumnPicker, setShowReportColumnPicker] = useState(false)
+  const [reportPickerLeft, setReportPickerLeft] = useState([])
+  const [reportPickerRight, setReportPickerRight] = useState([])
+  const [reportPickerLeftSelected, setReportPickerLeftSelected] = useState(new Set())
+  const [reportPickerRightSelected, setReportPickerRightSelected] = useState(new Set())
   const [reportMaxRows, setReportMaxRows] = useState(30)
   const [reportCollectionsMaxRows, setReportCollectionsMaxRows] = useState(30)
   const [dashboardStats, setDashboardStats] = useState({ members: null, users: null, loading: false })
@@ -1568,15 +1574,63 @@ export default function App(){
     return String(v).trim() !== ''
   }
 
+  function normalizeReportHeader(v){
+    return String(v || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, ' ')
+      .trim()
+  }
+
+  function isReportReceiptColumn(col){
+    const key = normalizeReportHeader(col)
+    return key === 'S1' || key === 'SNO' || key.includes('NAMBARI YA RISITI') || key.includes('RECEIPT')
+  }
+
+  function isReportDateColumn(col){
+    const key = normalizeReportHeader(col)
+    return key === 'S2' || key === 'TAREHE' || key === 'DATE'
+  }
+
+  function isReportSerialColumn(col){
+    const key = normalizeReportHeader(col)
+    return key === 'S3' || key === 'NA' || key === 'NO' || key.includes('SERIAL')
+  }
+
+  function isReportNameColumn(col){
+    const key = normalizeReportHeader(col)
+    return key === 'S4' || key === 'JINA' || key.includes('MEMBER NAME') || key === 'NAME'
+  }
+
+  function isReportTotalColumn(col){
+    const label = normalizeReportHeader(labelForColumn(col) || col)
+    return label === 'JUMLA' || label === 'TOTAL' || label.includes('JUMLA') || label.includes('TOTAL')
+  }
+
+  function isReportLikelyAmountColumn(col){
+    const key = String(col || '').trim().toLowerCase()
+    return /^c\d+$/.test(key) || /^l\d+$/.test(key) || /^s[5-9]$/.test(key)
+  }
+
+  function formatReportDate(v){
+    if(v === null || v === undefined || String(v).trim() === '') return ''
+    const d = new Date(v)
+    if(Number.isNaN(d.getTime())) return String(v)
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  }
+
+  function reportCellValue(col, row){
+    if(!row) return ''
+    if(isReportDateColumn(col)) return formatReportDate(row[col])
+    const v = row[col]
+    return v === null || v === undefined ? '' : String(v)
+  }
+
   function shouldHideMembersReportColumn(col){
     const key = String(col || '').trim().toLowerCase()
     return new Set([
       'id',
       'collection_code',
       'church',
-      's1',
-      'sno',
-      'tarehe',
       'is_locked',
       'locked_at',
       'unlocked_at',
@@ -1608,6 +1662,100 @@ export default function App(){
       })
     })
     return ordered
+  }
+
+  function buildDefaultReportColumns(allColumns){
+    const cols = (allColumns || []).filter((c)=> !shouldHideMembersReportColumn(c))
+    const receiptHiddenByDefault = cols.filter((c)=> !isReportReceiptColumn(c))
+
+    const dateCols = receiptHiddenByDefault.filter(isReportDateColumn)
+    const serialCols = receiptHiddenByDefault.filter((c)=> !dateCols.includes(c) && isReportSerialColumn(c))
+    const nameCols = receiptHiddenByDefault.filter((c)=> !dateCols.includes(c) && !serialCols.includes(c) && isReportNameColumn(c))
+
+    const remaining = receiptHiddenByDefault.filter((c)=> !dateCols.includes(c) && !serialCols.includes(c) && !nameCols.includes(c))
+
+    const preferredCodeNames = ['ZAKA', 'SADAKA']
+    const preferred = []
+    preferredCodeNames.forEach((codeName)=>{
+      const found = remaining.find((c)=> normalizeReportHeader(labelForColumn(c) || c) === codeName)
+      if(found && !preferred.includes(found)) preferred.push(found)
+    })
+
+    const totalCols = remaining.filter((c)=> isReportTotalColumn(c) && !preferred.includes(c))
+    const amountOthers = remaining
+      .filter((c)=> !preferred.includes(c) && !totalCols.includes(c))
+      .sort((a, b)=>{
+        const aAmount = isReportLikelyAmountColumn(a) ? 0 : 1
+        const bAmount = isReportLikelyAmountColumn(b) ? 0 : 1
+        if(aAmount !== bAmount) return aAmount - bAmount
+        return String(labelForColumn(a) || a).localeCompare(String(labelForColumn(b) || b))
+      })
+
+    return [...dateCols, ...serialCols, ...nameCols, ...preferred, ...amountOthers, ...totalCols]
+  }
+
+  function openReportColumnPicker(){
+    const all = getReportAllColumns(reportRows)
+    const current = reportVisibleCols.length ? reportVisibleCols.filter((c)=> all.includes(c)) : buildDefaultReportColumns(all)
+    const available = all.filter((c)=> !current.includes(c))
+    setReportPickerLeft(available)
+    setReportPickerRight(current)
+    setReportPickerLeftSelected(new Set())
+    setReportPickerRightSelected(new Set())
+    setShowReportColumnPicker(true)
+  }
+
+  function moveReportColumnsToRight(){
+    const selected = Array.from(reportPickerLeftSelected)
+    if(!selected.length) return
+    const nextLeft = reportPickerLeft.filter((c)=> !selected.includes(c))
+    const nextRight = [...reportPickerRight, ...selected.filter((c)=> !reportPickerRight.includes(c))]
+    setReportPickerLeft(nextLeft)
+    setReportPickerRight(nextRight)
+    setReportPickerLeftSelected(new Set())
+  }
+
+  function moveReportColumnsToLeft(){
+    const selected = Array.from(reportPickerRightSelected)
+    if(!selected.length) return
+    const nextRight = reportPickerRight.filter((c)=> !selected.includes(c))
+    const nextLeft = [...reportPickerLeft, ...selected.filter((c)=> !reportPickerLeft.includes(c))]
+    setReportPickerLeft(nextLeft)
+    setReportPickerRight(nextRight)
+    setReportPickerRightSelected(new Set())
+  }
+
+  function moveReportColumnUp(){
+    const selected = Array.from(reportPickerRightSelected)
+    if(selected.length !== 1) return
+    const col = selected[0]
+    const idx = reportPickerRight.findIndex((c)=> c === col)
+    if(idx <= 0) return
+    const next = [...reportPickerRight]
+    const swap = next[idx - 1]
+    next[idx - 1] = next[idx]
+    next[idx] = swap
+    setReportPickerRight(next)
+    setReportPickerRightSelected(new Set([col]))
+  }
+
+  function moveReportColumnDown(){
+    const selected = Array.from(reportPickerRightSelected)
+    if(selected.length !== 1) return
+    const col = selected[0]
+    const idx = reportPickerRight.findIndex((c)=> c === col)
+    if(idx < 0 || idx >= reportPickerRight.length - 1) return
+    const next = [...reportPickerRight]
+    const swap = next[idx + 1]
+    next[idx + 1] = next[idx]
+    next[idx] = swap
+    setReportPickerRight(next)
+    setReportPickerRightSelected(new Set([col]))
+  }
+
+  function applyReportColumns(){
+    setReportVisibleCols(reportPickerRight)
+    setShowReportColumnPicker(false)
   }
 
   function normalizeDateText(v){
@@ -2032,9 +2180,26 @@ export default function App(){
   }
 
   const reportAllColumns = getReportAllColumns(reportRows)
-  const reportVisibleColumns = reportShowOnlyDataColumns
-    ? getReportVisibleColumns(reportRows)
-    : reportAllColumns
+
+  useEffect(()=>{
+    const all = getReportAllColumns(reportRows)
+    if(!all.length){
+      setReportVisibleCols([])
+      return
+    }
+    setReportVisibleCols((prev)=>{
+      const normalizedPrev = (Array.isArray(prev) ? prev : []).filter((c)=> all.includes(c))
+      if(normalizedPrev.length) return normalizedPrev
+      return buildDefaultReportColumns(all)
+    })
+  }, [reportRows])
+
+  const reportVisibleColumns = (()=>{
+    const base = reportVisibleCols.length ? reportVisibleCols.filter((c)=> reportAllColumns.includes(c)) : buildDefaultReportColumns(reportAllColumns)
+    if(!reportShowOnlyDataColumns) return base
+    const filtered = base.filter((col)=> (Array.isArray(reportRows) ? reportRows : []).some((row)=> hasReportCellData(row?.[col])))
+    return filtered.length ? filtered : base
+  })()
 
   // ----- Simple helpers for role checks -----
   function isAdmin(){
@@ -3712,6 +3877,7 @@ export default function App(){
                 <label>To:</label>
                 <input type='date' value={reportTo} onChange={e=>setReportTo(e.target.value)} />
                 <button onClick={fetchMembersCollectionReport}>Run Report</button>
+                <button type='button' onClick={openReportColumnPicker}>Column Picker ({reportVisibleColumns.length} visible)</button>
                 <button style={{marginLeft:8}} onClick={async ()=>{ setShowCollectionsInReports(s=>!s); if(!showCollectionsInReports) await fetchMembersCollections(); }}>{showCollectionsInReports? 'Hide Collections':'View Collections'}</button>
                 <label style={{marginLeft:8}}>Max rows</label>
                 <select value={reportMaxRows} onChange={e=>setReportMaxRows(Number(e.target.value))}>
@@ -3726,6 +3892,9 @@ export default function App(){
                   Only columns with data
                 </label>
                 <span style={{color:'#666'}}>Showing {Math.min(reportRows.length, reportMaxRows)} of {reportRows.length}</span>
+              </div>
+              <div style={{marginTop:6, fontSize:12, color:'#334155', fontWeight:600}}>
+                Showing columns: {reportVisibleColumns.map((c)=> labelForColumn(c)).join(', ')}
               </div>
 
               <div style={{marginTop:12, border:'1px solid #dbeafe', borderRadius:8, padding:10, background:'#f8fbff'}}>
@@ -3757,8 +3926,100 @@ export default function App(){
                 </div>
               </div>
 
-              <div style={{...mainGridWrapStyle(400), marginTop:8}}>
-                <table style={mainGridTableStyle(true)}>
+              {showReportColumnPicker && (
+                <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
+                  <div style={{background:'#fff',borderRadius:8,padding:24,maxWidth:820,width:'92%',maxHeight:'90vh',overflow:'auto',boxShadow:'0 10px 40px rgba(0,0,0,0.3)'}}>
+                    <h3 style={{marginTop:0,marginBottom:20,fontSize:18,fontWeight:800,color:'#111827'}}>Report Column Picker</h3>
+
+                    <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',gap:16,marginBottom:20}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:800,marginBottom:8,color:'#111827'}}>AVAILABLE COLUMNS</div>
+                        <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:280,maxHeight:380,overflowY:'auto',background:'#fafafa'}}>
+                          {reportPickerLeft.length === 0 ? (
+                            <div style={{padding:12,textAlign:'center',color:'#475569',fontSize:12,fontWeight:600}}>No available columns</div>
+                          ) : reportPickerLeft.map((col)=> (
+                            <div
+                              key={col}
+                              onClick={()=>{
+                                const next = new Set(reportPickerLeftSelected)
+                                if(next.has(col)) next.delete(col)
+                                else next.add(col)
+                                setReportPickerLeftSelected(next)
+                              }}
+                              style={{
+                                padding:'10px 12px',
+                                borderBottom:'1px solid #e5e5e5',
+                                cursor:'pointer',
+                                background:reportPickerLeftSelected.has(col) ? '#e3f2fd' : '#fafafa',
+                                fontSize:13,
+                                color:'#111827',
+                                fontWeight:600,
+                                userSelect:'none'
+                              }}
+                            >
+                              {labelForColumn(col)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{display:'flex',flexDirection:'column',justifyContent:'center',gap:8}}>
+                        <button onClick={moveReportColumnsToRight} disabled={reportPickerLeftSelected.size===0} style={{padding:'8px 12px',fontSize:14,cursor:reportPickerLeftSelected.size===0? 'default':'pointer',opacity:reportPickerLeftSelected.size===0?0.5:1,background:'#0a58ca',color:'#fff',border:'none',borderRadius:4,fontWeight:600}}>Add →</button>
+                        <button onClick={moveReportColumnsToLeft} disabled={reportPickerRightSelected.size===0} style={{padding:'8px 12px',fontSize:14,cursor:reportPickerRightSelected.size===0? 'default':'pointer',opacity:reportPickerRightSelected.size===0?0.5:1,background:'#dc3545',color:'#fff',border:'none',borderRadius:4,fontWeight:600}}>← Remove</button>
+                      </div>
+
+                      <div>
+                        <div style={{fontSize:12,fontWeight:800,marginBottom:8,color:'#111827'}}>SELECTED COLUMNS</div>
+                        <div style={{border:'1px solid #ddd',borderRadius:6,minHeight:280,maxHeight:380,overflowY:'auto',background:'#f0f9ff'}}>
+                          {reportPickerRight.length === 0 ? (
+                            <div style={{padding:12,textAlign:'center',color:'#475569',fontSize:12,fontWeight:600}}>No selected columns</div>
+                          ) : reportPickerRight.map((col, idx)=> (
+                            <div
+                              key={col}
+                              onClick={()=>{
+                                const next = new Set(reportPickerRightSelected)
+                                if(next.has(col)) next.delete(col)
+                                else next.add(col)
+                                setReportPickerRightSelected(next)
+                              }}
+                              style={{
+                                padding:'10px 12px',
+                                borderBottom:'1px solid #e5e5e5',
+                                cursor:'pointer',
+                                background:reportPickerRightSelected.has(col) ? '#bbdefb' : '#f0f9ff',
+                                fontSize:13,
+                                color:'#111827',
+                                fontWeight:600,
+                                userSelect:'none',
+                                display:'flex',
+                                justifyContent:'space-between',
+                                alignItems:'center'
+                              }}
+                            >
+                              <span>{labelForColumn(col)}</span>
+                              <span style={{fontSize:11,color:'#334155',fontWeight:700}}>{idx + 1}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {reportPickerRightSelected.size === 1 && (
+                          <div style={{marginTop:8,display:'flex',gap:6}}>
+                            <button onClick={moveReportColumnUp} style={{flex:1,padding:'6px 8px',fontSize:12,background:'#28a745',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}>Move Up</button>
+                            <button onClick={moveReportColumnDown} style={{flex:1,padding:'6px 8px',fontSize:12,background:'#28a745',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}>Move Down</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:20}}>
+                      <button onClick={()=>setShowReportColumnPicker(false)} style={{padding:'8px 16px',fontSize:13,background:'#e0e0e0',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}>Cancel</button>
+                      <button onClick={applyReportColumns} style={{padding:'8px 16px',fontSize:13,background:'#0a58ca',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',fontWeight:600}}>Apply</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{...mainGridWrapStyle(440), marginTop:8, overflowX:'auto', overflowY:'auto'}}>
+                <table style={{...mainGridTableStyle(true), minWidth: Math.max(900, reportVisibleColumns.length * 140)}}>
                   <thead>
                     <tr>
                       {reportRows[0] ? reportVisibleColumns.map(k=> <th key={k}>{labelForColumn(k)}</th>) : <th>No rows</th>}
@@ -3768,7 +4029,7 @@ export default function App(){
                     {(() => {
                       try{
                         return (Array.isArray(reportRows)? reportRows : []).slice(0, reportMaxRows).map((r,idx)=> (
-                          <tr key={idx}>{reportVisibleColumns.map(k=> <td key={k} style={{padding:6}}>{String((r&&r[k])||'')}</td>)}</tr>
+                          <tr key={idx}>{reportVisibleColumns.map(k=> <td key={k} style={{padding:6}}>{reportCellValue(k, r)}</td>)}</tr>
                         ))
                       }catch(e){
                         console.error('Render error in reports table', e)
