@@ -856,7 +856,13 @@ export default function App(){
     if(found){
       return found.custom_collection_name || found.code || found.column_name || col
     }
-    const human = { s1: 'Sno', s2: 'Date', s3: 'Serial', s4: 'Name' }[col];
+    const human = {
+      s1: 'Sno',
+      s2: 'Date',
+      s3: 'Serial',
+      s4: 'Name',
+      collection_entry_method: 'Collection Entry Method',
+    }[col];
     return human || col;
   }
 
@@ -898,6 +904,13 @@ export default function App(){
       const found = (collectionCodes||[]).find(c=> c.column_name === raw || c.code === raw);
       if(found) return found.column_name || found.code || raw;
       return raw || '';
+    }
+    if(k === 'collection_entry_method'){
+      const raw = String(row.collection_entry_method || '').trim().toLowerCase();
+      if(raw === 'form_entry') return 'form entry';
+      if(raw === 'import') return 'import';
+      if(raw === 'form') return 'form entry';
+      return raw;
     }
     if(k === 'verified'){
       return row && row.__verified? 'Yes':'No';
@@ -1426,7 +1439,7 @@ export default function App(){
 
   function recomputeMappedPreview(mappingToUse = mapping){
     const rows = (fullPreview||[]).map(r=>{
-      const out = {collection_code:'import'};
+      const out = {collection_entry_method: 'import'};
       if(selectedChurch) out.church = selectedChurch;
       if(selectedDate) out.s2 = new Date(selectedDate).toISOString();
       if(uploaderName) out.source = uploaderName;
@@ -4191,7 +4204,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   function recomputeMappedPreview(mappingToUse = mapping, rowsSource = null){
     const rowsSrc = rowsSource || preview || fullPreview || [];
     const rows = (rowsSrc||[]).map((r, idx)=>{
-      const out = {collection_code:'import'};
+      const out = {collection_entry_method: 'import'};
       if(selectedChurch) out.church = selectedChurch;
       if(selectedDate) out.s2 = new Date(selectedDate).toISOString();
       if(uploaderName) out.source = uploaderName;

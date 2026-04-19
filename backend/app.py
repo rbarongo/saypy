@@ -574,6 +574,7 @@ async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api
             pass
     if actor_church is not None:
         out_df['church'] = actor_church
+    out_df['collection_entry_method'] = 'import'
     # Filter rows: only keep rows where the guessed S1/serial column has a non-empty value
     s1_col = _guess_s1_column(out_df)
     if s1_col is not None:
@@ -1052,9 +1053,16 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
             row['church'] = uploader.get('church')
         row['church'] = _enforce_church_scope(row.get('church'), actor_church, context='bulk members_collection insert')
 
-        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
+        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'collection_entry_method', 'notes'):
             if row.get(sk) is not None and not isinstance(row.get(sk), str):
                 row[sk] = str(row.get(sk))
+
+        method_raw = str(row.get('collection_entry_method') or '').strip().lower()
+        if method_raw in {'form', 'form-entry', 'formentry'}:
+            method_raw = 'form_entry'
+        if method_raw in {'', 'none', 'nan', 'null'}:
+            method_raw = 'import' if str(row.get('collection_code') or '').strip().lower() == 'import' else 'form_entry'
+        row['collection_entry_method'] = method_raw
 
         # set source from uploader if not present
         try:
@@ -1135,6 +1143,7 @@ def list_collection_codes(current_user: dict = Depends(get_current_user)):
 
 class MembersCollectionRow(BaseModel):
     collection_code: Optional[str] = None
+    collection_entry_method: Optional[str] = None
     member_id: Optional[int] = None
     # s1/s3 can be auto-generated from s2 + church daily sequence.
     s1: Optional[str] = None
@@ -1235,9 +1244,16 @@ def validate_members_collections(rows: List[dict], auth: dict = Depends(require_
             row['church'] = uploader.get('church')
         row['church'] = _enforce_church_scope(row.get('church'), actor_church, context='validation request')
 
-        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
+        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'collection_entry_method', 'notes'):
             if row.get(sk) is not None and not isinstance(row.get(sk), str):
                 row[sk] = str(row.get(sk))
+
+        method_raw = str(row.get('collection_entry_method') or '').strip().lower()
+        if method_raw in {'form', 'form-entry', 'formentry'}:
+            method_raw = 'form_entry'
+        if method_raw in {'', 'none', 'nan', 'null'}:
+            method_raw = 'import' if str(row.get('collection_code') or '').strip().lower() == 'import' else 'form_entry'
+        row['collection_entry_method'] = method_raw
 
         pre_rows.append(row)
 
@@ -2366,3 +2382,4 @@ def get_members_view(auth: dict = Depends(require_api_key_or_user)):
         return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read members_view: {e}")
+

@@ -275,9 +275,17 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
     for row in rows:
         r = dict(row)
 
-        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'notes'):
+        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'collection_entry_method', 'notes'):
             if r.get(sk) is not None and not isinstance(r.get(sk), str):
                 r[sk] = str(r.get(sk))
+
+        method_text = str(r.get('collection_entry_method') or '').strip().lower()
+        if method_text in {'form', 'form-entry', 'formentry'}:
+            method_text = 'form_entry'
+        if method_text == '' or method_text in {'none', 'nan', 'null'}:
+            code_probe = str(r.get('collection_code') or '').strip().lower()
+            method_text = 'import' if code_probe == 'import' else 'form_entry'
+        r['collection_entry_method'] = method_text
 
         code_text = str(r.get('collection_code') or '').strip()
         if code_text == '' or code_text.lower() in {'none', 'nan', 'null'}:
@@ -564,6 +572,7 @@ members_collection = Table(
     'members_collection', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
     Column('collection_code', String(200), nullable=False),
+    Column('collection_entry_method', String(40), nullable=True),
     Column('member_id', Integer, ForeignKey('members.id'), nullable=True),
     Column('church', Integer, ForeignKey('church.id'), nullable=True),
     Column('s1', String(32), nullable=True),
@@ -1774,6 +1783,7 @@ def ensure_members_collection_schema() -> List[str]:
         expected[f'l{i}'] = 'NUMERIC'
     # other text fields
     expected['source'] = 'TEXT'
+    expected['collection_entry_method'] = 'TEXT'
     expected['notes'] = 'TEXT'
     expected['church'] = 'INTEGER'
     expected['is_locked'] = 'INTEGER'
@@ -1822,6 +1832,22 @@ def ensure_members_collection_schema() -> List[str]:
                 conn.execute(text('ALTER TABLE members_collection ALTER COLUMN s3 TYPE INTEGER USING CASE WHEN s3 IS NULL THEN NULL ELSE ROUND(s3)::INTEGER END'))
             except Exception:
                 pass
+
+    # Keep entry method explicit for old and new rows.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                """
+                UPDATE members_collection
+                SET collection_entry_method = CASE
+                    WHEN LOWER(TRIM(COALESCE(collection_code, ''))) = 'import' THEN 'import'
+                    ELSE 'form_entry'
+                END
+                WHERE collection_entry_method IS NULL OR TRIM(COALESCE(collection_entry_method, '')) = ''
+                """
+            ))
+    except Exception:
+        pass
 
     return added_cols
 
@@ -2021,7 +2047,12 @@ def deduplicate_members_collection_s1():
 def insert_members_collection(collection_code: str, member_id: Optional[int] = None, church: Optional[int] = None) -> int:
     """Insert into members_collection and return the new `id`."""
     ensure_db_exists()
-    stmt = sql_insert(members_collection).values(collection_code=collection_code, member_id=member_id, church=church)
+    stmt = sql_insert(members_collection).values(
+        collection_code=collection_code,
+        collection_entry_method='form_entry',
+        member_id=member_id,
+        church=church,
+    )
     try:
         with engine.begin() as conn:
             res = conn.execute(stmt)
