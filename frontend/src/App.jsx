@@ -2174,7 +2174,7 @@ export default function App(){
         }))
       }
       const outWithTotal = appendGroupedTotalsRow(out, 'date')
-      setBuiltReportColumns(['date', 'entries', 'local', 'conference', 'total'])
+      setBuiltReportColumns(['date', 'conference', 'local', 'total'])
       setBuiltReportRows(outWithTotal)
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
@@ -2463,11 +2463,21 @@ export default function App(){
     return null
   }
 
+  function labelForBuiltReportColumn(col, datasetTitle = ''){
+    const key = String(col || '').trim().toLowerCase()
+    const isDailyTotals = selectedReportBuilder === 'daily_totals' || String(datasetTitle || '').toLowerCase().includes('daily totals')
+    if(isDailyTotals && key === 'date') return 'Date'
+    if(isDailyTotals && key === 'conference') return 'Conference Amount'
+    if(isDailyTotals && key === 'local') return `${currentChurchName()} Amount`
+    if(isDailyTotals && key === 'total') return 'Total Amount'
+    return labelForColumn(col)
+  }
+
   function exportBuiltReportExcel(){
     try{
       const dataset = currentBuiltReportDataset()
       if(!dataset){ setStatus('Build a report first before export.'); return }
-      const prettyCols = dataset.columns.map(c=>labelForColumn(c))
+      const prettyCols = dataset.columns.map(c=>labelForBuiltReportColumn(c, dataset.title))
       const rows = [
         [dataset.title],
         [`Church: ${currentChurchName()}`],
@@ -2496,7 +2506,7 @@ export default function App(){
       doc.setFontSize(10)
       doc.text(`Church: ${currentChurchName()}`, 36, 52)
       doc.text(`Period: ${reportFrom || 'All'} to ${reportTo || 'All'}`, 36, 66)
-      const head = [dataset.columns.map(c=>labelForColumn(c))]
+      const head = [dataset.columns.map(c=>labelForBuiltReportColumn(c, dataset.title))]
       const body = dataset.rows.map(row=> dataset.columns.map(col=>{
         const v = row?.[col]
         return ['amount','local','conference','total'].includes(String(col)) ? formatNumber(v) : String(v ?? '')
@@ -4146,7 +4156,7 @@ export default function App(){
                   <div style={mainGridWrapStyle(320)}>
                     <table style={mainGridTableStyle(true)}>
                       <thead>
-                        <tr>{builtReportColumns.map(c=> <th key={c}>{labelForColumn(c)}</th>)}</tr>
+                        <tr>{builtReportColumns.map(c=> <th key={c}>{labelForBuiltReportColumn(c)}</th>)}</tr>
                       </thead>
                       <tbody>
                         {builtReportRows.slice(0, reportMaxRows).map((row, idx)=> (
