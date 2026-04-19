@@ -3640,7 +3640,6 @@ export default function App(){
                         {memberLabelForColumn(h)} {membersSortKey===h ? (membersSortDir==='asc' ? '▲' : '▼') : ''}
                       </th>
                     ))}
-                    <th style={{whiteSpace:'nowrap'}}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3651,26 +3650,6 @@ export default function App(){
                       style={{cursor:'pointer'}}
                     >
                       {getMembersDisplayColumns().map(h=> <td key={h}>{memberDisplayCellValue(h, m)}</td>)}
-                      <td style={{whiteSpace:'nowrap'}}>
-                        <button
-                          style={{fontSize:12,padding:0,marginRight:8,border:'none',background:'transparent',color:'#2563eb',textDecoration:'underline',cursor:'pointer'}}
-                          onClick={e=>{ e.stopPropagation(); setEditingMember(m); setMemberForm({...m}); setShowMemberGroupInfo(false); setShowMembershipInfo(false); setShowMemberForm(true); setMapMode(null); }}
-                        >
-                          Edit Member
-                        </button>
-                        <button
-                          style={{fontSize:12,padding:0,marginRight:8,border:'none',background:'transparent',color:'#2563eb',textDecoration:'underline',cursor:'pointer'}}
-                          onClick={e=>{ e.stopPropagation(); setMapTargetMember(m); setMapMode('member'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setShowMemberForm(false); }}
-                        >
-                          Map Member
-                        </button>
-                        <button
-                          style={{fontSize:12,padding:0,border:'none',background:'transparent',color:'#2563eb',textDecoration:'underline',cursor:'pointer'}}
-                          onClick={e=>{ e.stopPropagation(); setMapTargetMember(m); setMapMode('family'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setShowMemberForm(false); }}
-                        >
-                          Map Families
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -3679,17 +3658,10 @@ export default function App(){
 
             {showMemberForm && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:8}}>
+                <div style={{display:'flex',justifyContent:'flex-start',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:8}}>
                   <h4 style={{margin:0}}>{editingMember? 'Edit Member' : 'New Member'}</h4>
                   {editingMember && (
                     <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
-                      <button
-                        type='button'
-                        style={{fontSize:13,padding:0,border:'none',background:'transparent',color:'#2563eb',textDecoration:'underline',cursor:'pointer',fontWeight:700}}
-                        onClick={()=>{ setEditingMember(editingMember); setMemberForm({...editingMember}); setMapMode(null) }}
-                      >
-                        Edit Member
-                      </button>
                       <button
                         type='button'
                         style={{fontSize:13,padding:0,border:'none',background:'transparent',color:'#2563eb',textDecoration:'underline',cursor:'pointer',fontWeight:700}}
