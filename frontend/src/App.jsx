@@ -3753,7 +3753,7 @@ export default function App(){
                         })
                       }
 
-                      ;(members || []).forEach(m=>{
+                      ;(filteredMembers || []).forEach(m=>{
                         const uniqueRaw = m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id
                         const uniqueVal = Number(uniqueRaw)
                         if(!Number.isFinite(uniqueVal) || uniqueVal <= 0) return
@@ -3766,7 +3766,8 @@ export default function App(){
                       })
 
                       if(Number.isFinite(selectedMemberIdentity) && selectedMemberIdentity > 0 && !seenIdentity.has(selectedMemberIdentity)){
-                        const found = (members || []).find(m => Number(m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id) === selectedMemberIdentity || Number(m?.MEMBER_ID ?? m?.member_id) === selectedMemberIdentity)
+                        const found = (filteredMembers || []).find(m => Number(m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id) === selectedMemberIdentity || Number(m?.MEMBER_ID ?? m?.member_id) === selectedMemberIdentity)
+                          || (members || []).find(m => Number(m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id) === selectedMemberIdentity || Number(m?.MEMBER_ID ?? m?.member_id) === selectedMemberIdentity)
                         const fallbackName = String(found?.MEMBER_NAME || found?.member_name || '').trim() || 'Selected Identity'
                         identityOptions.push({ value: selectedMemberIdentity, label: `${fallbackName} (ID:${selectedMemberIdentity})` })
                       }
@@ -3799,28 +3800,46 @@ export default function App(){
 
                       const selectedMemberId = (isDefault && !isGroup) ? effectiveDefaultVal : val
 
-                      // Build filtered options: editing member first, then members with a value in the relevant ID field
+                      // Build filtered options for mapped identity selection.
+                      // Family rows include: current member + unique identity ids + family ids.
                       const seenFam = new Set()
                       const famOptions = []
                       const selfId = Number.isFinite(editingMemberOwnId) && editingMemberOwnId > 0 ? editingMemberOwnId : null
                       const selfName = String(memberForm?.MEMBER_NAME || memberForm?.member_name || editingMember?.MEMBER_NAME || editingMember?.member_name || '').trim()
-                      if(selfId){
-                        seenFam.add(selfId)
-                        famOptions.push({ value: selfId, label: `${selfName || 'Current Member'} (ID:${selfId})` })
+                      const addFamilyOption = (identityRaw, fallbackName)=>{
+                        const identity = Number(identityRaw)
+                        if(!Number.isFinite(identity) || identity <= 0) return
+                        if(seenFam.has(identity)) return
+                        seenFam.add(identity)
+                        const mappedMember = (members || []).find(mm => Number(mm?.MEMBER_ID ?? mm?.member_id) === identity)
+                        const mappedName = String(mappedMember?.MEMBER_NAME || mappedMember?.member_name || fallbackName || '').trim() || 'Unknown'
+                        famOptions.push({ value: identity, label: `${mappedName} (ID:${identity})` })
                       }
-                      ;(members || []).forEach(m=>{
-                        const refRaw = isGroup
-                          ? (m?.GROUP_LEADER_ID ?? m?.group_leader_id)
-                          : (m?.FAMILY_ID ?? m?.family_id)
-                        const refVal = Number(refRaw)
-                        if(!Number.isFinite(refVal) || refVal <= 0) return
-                        if(seenFam.has(refVal)) return
-                        seenFam.add(refVal)
-                        const mName = String(m?.MEMBER_NAME || m?.member_name || '').trim() || 'Unknown'
-                        const mId = m?.MEMBER_ID ?? m?.member_id
-                        const displayId = (mId !== null && mId !== undefined && String(mId).trim() !== '') ? mId : refVal
-                        famOptions.push({ value: refVal, label: `${mName} (ID:${displayId})` })
-                      })
+
+                      if(selfId){
+                        addFamilyOption(selfId, selfName || 'Current Member')
+                      }
+
+                      if(isGroup){
+                        ;(members || []).forEach(m=>{
+                          const refRaw = m?.GROUP_LEADER_ID ?? m?.group_leader_id
+                          const sourceName = String(m?.MEMBER_NAME || m?.member_name || '').trim()
+                          addFamilyOption(refRaw, sourceName)
+                        })
+                      } else {
+                        // Include members appearing under unique identity mapping.
+                        ;(members || []).forEach(m=>{
+                          const uidRaw = m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id
+                          const sourceName = String(m?.MEMBER_NAME || m?.member_name || '').trim()
+                          addFamilyOption(uidRaw, sourceName)
+                        })
+                        // Include members appearing under family identity mapping.
+                        ;(members || []).forEach(m=>{
+                          const famRaw = m?.FAMILY_ID ?? m?.family_id
+                          const sourceName = String(m?.MEMBER_NAME || m?.member_name || '').trim()
+                          addFamilyOption(famRaw, sourceName)
+                        })
+                      }
                       // Fallback: if current saved value not in set, append it
                       const curNum = Number(selectedMemberId)
                       if(Number.isFinite(curNum) && curNum > 0 && !seenFam.has(curNum)){
