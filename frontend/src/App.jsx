@@ -1551,9 +1551,8 @@ export default function App(){
       const params = new URLSearchParams()
       if(reportFrom) params.set('start_date', String(reportFrom))
       if(reportTo) params.set('end_date', String(reportTo))
-      // Reports should summarize the selected period, not the API default preview window.
-      // Request a large limit so report builders work on complete data.
-      params.set('limit', '100000')
+      // Reports should use full dataset; backend treats limit<=0 as unlimited.
+      params.set('limit', '0')
       const qs = params.toString()
       const url = qs
         ? `http://localhost:8000/reports/members_collections?${qs}`
@@ -2247,8 +2246,9 @@ export default function App(){
     }
   }
 
-  async function buildSelectedReport(){
-    if(selectedReportBuilder === 'daily_totals'){
+  async function buildSelectedReport(builderOverride = null, contributorOverride = null){
+    const activeBuilder = builderOverride || selectedReportBuilder
+    if(activeBuilder === 'daily_totals'){
       try{
         let url = 'http://localhost:8000/reports/daily_summary'
         const params = []
@@ -2285,7 +2285,7 @@ export default function App(){
       return
     }
 
-    if(selectedReportBuilder === 'details'){
+    if(activeBuilder === 'details'){
       const out = [...entries]
         .sort((a, b)=>{
           const ad = a.date || '9999-12-31'
@@ -2313,7 +2313,7 @@ export default function App(){
       return
     }
 
-    if(selectedReportBuilder === 'item_totals'){
+    if(activeBuilder === 'item_totals'){
       const grouped = groupAndSum(entries, e=> e.item_name || 'Unknown item')
       const out = Object.keys(grouped).map(item=> ({
         item,
@@ -2337,15 +2337,20 @@ export default function App(){
       return
     }
 
-    if(selectedReportBuilder === 'contributor_totals'){
-      const contributor = String(selectedContributorName || '').trim()
+    if(activeBuilder === 'contributor_totals'){
+      let contributor = String(contributorOverride != null ? contributorOverride : selectedContributorName || '').trim()
+      if(!contributor){
+        const firstName = Array.from(new Set((Array.isArray(reportRows) ? reportRows : []).map((r)=> String(r?.s4 || '').trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b))[0] || ''
+        contributor = firstName
+        if(contributor) setSelectedContributorName(contributor)
+      }
       if(!contributor){
         setBuiltReportColumns([])
         setBuiltReportRows([])
         setItemTotalsByDateRows([])
         setMeetingSummaryRows([])
         setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
-        setStatus('Select contributor name first for Contributor Totals report.')
+        setStatus('No contributor names found in the current report rows.')
         return
       }
       const matrix = buildContributorDateItemMatrix(entries, contributor)

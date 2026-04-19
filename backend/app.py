@@ -2221,8 +2221,10 @@ def report_members_collections(
             effective_limit = 10
         if effective_limit is not None:
             try:
-                lim = max(1, int(effective_limit))
-                df = df.head(lim)
+                lim = int(effective_limit)
+                # limit<=0 means "no limit" for report builder flows that need full data.
+                if lim > 0:
+                    df = df.head(lim)
             except Exception:
                 pass
         rows = df.to_dict(orient='records')
