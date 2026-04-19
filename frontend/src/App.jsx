@@ -692,6 +692,7 @@ export default function App(){
   const [mapFilter, setMapFilter] = useState('')
   const [mapRight, setMapRight] = useState([]) // array of member objects on RHS
   const [mapDesignated, setMapDesignated] = useState(null) // id of designated unique/family name
+  const [mapSaveMessage, setMapSaveMessage] = useState('')
   const [memberForm, setMemberForm] = useState({})
   const [showMemberGroupInfo, setShowMemberGroupInfo] = useState(false)
   const [showMembershipInfo, setShowMembershipInfo] = useState(false)
@@ -3665,14 +3666,14 @@ export default function App(){
                       <button
                         type='button'
                         style={{fontSize:13,padding:0,border:'none',background:'transparent',color:'#2563eb',textDecoration:'underline',cursor:'pointer',fontWeight:700}}
-                        onClick={()=>{ setMapTargetMember(editingMember); setMapMode('member'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setShowMemberForm(false); }}
+                        onClick={()=>{ setMapTargetMember(editingMember); setMapMode('member'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setMapSaveMessage(''); setShowMemberForm(false); }}
                       >
                         Map Member
                       </button>
                       <button
                         type='button'
                         style={{fontSize:13,padding:0,border:'none',background:'transparent',color:'#2563eb',textDecoration:'underline',cursor:'pointer',fontWeight:700}}
-                        onClick={()=>{ setMapTargetMember(editingMember); setMapMode('family'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setShowMemberForm(false); }}
+                        onClick={()=>{ setMapTargetMember(editingMember); setMapMode('family'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setMapSaveMessage(''); setShowMemberForm(false); }}
                       >
                         Map Families
                       </button>
@@ -4094,11 +4095,12 @@ export default function App(){
                             if(res.ok) ok++
                           }
                           setStatus(`Map Member saved: ${ok}/${mapRight.length} updated with MEMBER_ID=${designatedMemberId} and OFFICIAL_MEMBER_ID=${designatedMemberId}`)
-                          setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null)
+                          setMapSaveMessage('Mapping was saved successfully.')
                           await fetchMembers('')
                         }catch(e){ setStatus('Map Member save failed: '+e.message) }
                       }}>Save Unique Identity Mapping</button>
-                    <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); }} style={{fontSize:14,fontWeight:700,padding:'9px 16px'}}>Cancel</button>
+                    <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); setMapSaveMessage(''); }} style={{fontSize:14,fontWeight:700,padding:'9px 16px'}}>Cancel</button>
+                    {mapSaveMessage && <span style={{alignSelf:'center',fontSize:14,fontWeight:800,color:'#2563eb'}}>{mapSaveMessage}</span>}
                   </div>
                 </div>
               )
@@ -4193,11 +4195,12 @@ export default function App(){
                             if(res.ok) ok++
                           }
                           setStatus(`Map Families saved: ${ok}/${mapRight.length} updated with FAMILY_ID=${desFamilyId}`)
-                          setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null)
+                          setMapSaveMessage('Mapping was saved successfully.')
                           await fetchMembers('')
                         }catch(e){ setStatus('Map Families save failed: '+e.message) }
                       }}>Save Family Mapping</button>
-                    <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); }} style={{fontSize:14,fontWeight:700,padding:'9px 16px'}}>Cancel</button>
+                    <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); setMapSaveMessage(''); }} style={{fontSize:14,fontWeight:700,padding:'9px 16px'}}>Cancel</button>
+                    {mapSaveMessage && <span style={{alignSelf:'center',fontSize:14,fontWeight:800,color:'#16a34a'}}>{mapSaveMessage}</span>}
                   </div>
                 </div>
               )
