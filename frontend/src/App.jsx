@@ -2442,16 +2442,20 @@ export default function App(){
         conference: grouped[item].conference,
         total: grouped[item].total,
         entries: grouped[item].count,
-      })).sort((a, b)=>{
+      }))
+        .filter((row)=>{
+          const key = String(row?.item || '').trim().toLowerCase()
+          return key !== 'na' && key !== 'n/a' && key !== 'total'
+        })
+        .sort((a, b)=>{
         const diff = safeNumber(b.total) - safeNumber(a.total)
         if(diff !== 0) return diff
         return String(a.item || '').localeCompare(String(b.item || ''))
       })
-      const outWithTotal = appendGroupedTotalsRow(out, 'item')
       const byDateWithTotal = appendGroupedTotalsRow(buildDateGroupedCollectionTotals(entries), 'date')
       setBuiltReportType(activeBuilder)
       setBuiltReportColumns(['item', 'entries', 'local', 'conference', 'total'])
-      setBuiltReportRows(outWithTotal)
+      setBuiltReportRows(out)
       setItemTotalsByDateRows(byDateWithTotal)
       setStatus('Collection item totals report built successfully.')
       return
@@ -2720,6 +2724,11 @@ export default function App(){
     if(isDailyTotals && key === 'conference') return 'Conference Amount'
     if(isDailyTotals && key === 'local') return `${currentChurchName()} Amount`
     if(isDailyTotals && key === 'total') return 'Total Amount'
+    if(builderId === 'item_totals' && key === 'item') return 'ITEM'
+    if(builderId === 'item_totals' && key === 'entries') return 'ENTRIES'
+    if(builderId === 'item_totals' && key === 'local') return 'LOCAL'
+    if(builderId === 'item_totals' && key === 'conference') return 'CONFERENCE'
+    if(builderId === 'item_totals' && key === 'total') return 'TOTAL'
     if(builderId === 'contributor_totals' && key === 'date') return 'Date'
     if(builderId === 'contributor_totals' && key === 'row_total') return 'Total'
     return labelForColumn(col)
