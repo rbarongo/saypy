@@ -3621,7 +3621,7 @@ export default function App(){
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
                 <div style={{display:'grid',gridTemplateColumns:'minmax(180px, 260px) minmax(240px, 1fr)',gap:'10px 12px',alignItems:'center'}}>
                   {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
-                    if(['id','created_at','church','MEMBER_ID','member_id'].includes(key)) return null
+                    if(['id','created_at','church','MEMBER_ID','member_id','sno','STATUS_UPDATED_AT'].includes(key)) return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
                     let control = null
                     if(key==='STATUS'){
