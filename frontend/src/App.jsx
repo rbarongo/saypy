@@ -687,6 +687,7 @@ export default function App(){
   const [showMemberForm, setShowMemberForm] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
   const [memberForm, setMemberForm] = useState({})
+  const [showMemberGroupInfo, setShowMemberGroupInfo] = useState(false)
   const [showTransferChurchCreator, setShowTransferChurchCreator] = useState(false)
   const [newTransferChurchName, setNewTransferChurchName] = useState('')
   const [membersFields, setMembersFields] = useState([])
@@ -1288,6 +1289,18 @@ export default function App(){
       sno: 'S/N',
       MEMBER_NAME: 'Member Name',
       MEMBER_ID: 'Member ID',
+      OFFICIAL_MEMBER_ID: 'Unique Member ID',
+      official_member_id: 'Unique Member ID',
+      GROUP_NAME: 'Group Name',
+      group_name: 'Group Name',
+      GROUP_ALIAS: 'Group Alias',
+      group_alias: 'Group Alias',
+      DEFAULT_GROUP_ALIAS: 'Default Group Alias',
+      default_group_alias: 'Default Group Alias',
+      GROUP_LEADER_ID: 'Group Leader ID',
+      group_leader_id: 'Group Leader ID',
+      DEFAULT_GROUP_LEADER_ID: 'Default Group Leader ID',
+      default_group_leader_id: 'Default Group Leader ID',
       PHONE: 'Phone',
       church: 'Church',
       STATUS: 'Member Status',
@@ -3490,7 +3503,7 @@ export default function App(){
               <input placeholder='Filter loaded members...' value={membersSearchText} onChange={e=>setMembersSearchText(e.target.value)} />
               <button onClick={addMembersFilter}>Add Field Filter</button>
               <button onClick={clearMembersFilters}>Clear Field Filters</button>
-              <button style={{marginLeft:8}} onClick={()=>{ setEditingMember(null); setMemberForm({}); setShowMemberForm(true); }}>New Member</button>
+              <button style={{marginLeft:8}} onClick={()=>{ setEditingMember(null); setMemberForm({}); setShowMemberGroupInfo(false); setShowMemberForm(true); }}>New Member</button>
               <button style={{marginLeft:12}} onClick={openMembersColumnPicker}>Column Picker</button>
               <button onClick={saveMembersColumnSelection}>Save Selection</button>
               <button onClick={exportMembersExcel}>Export Excel</button>
@@ -3608,7 +3621,7 @@ export default function App(){
                 </thead>
                 <tbody>
                   {filteredMembers.slice(0, membersMaxRows).map(m=> (
-                    <tr key={m.id} onClick={()=>{ setEditingMember(m); setMemberForm({...m}); setShowMemberForm(true); }} style={{cursor:'pointer'}}>
+                    <tr key={m.id} onClick={()=>{ setEditingMember(m); setMemberForm({...m}); setShowMemberGroupInfo(false); setShowMemberForm(true); }} style={{cursor:'pointer'}}>
                       {getMembersDisplayColumns().map(h=> <td key={h}>{memberDisplayCellValue(h, m)}</td>)}
                     </tr>
                   ))}
@@ -3619,9 +3632,37 @@ export default function App(){
             {showMemberForm && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
+                <div style={{marginBottom:10}}>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:13,color:'#0f172a'}}>
+                    <input
+                      type='checkbox'
+                      checked={showMemberGroupInfo}
+                      onChange={e=>setShowMemberGroupInfo(Boolean(e.target.checked))}
+                    />
+                    Show Group Information
+                  </label>
+                </div>
                 <div style={{display:'grid',gridTemplateColumns:'160px 1fr 1fr',gap:16,alignItems:'start'}}>
-                  {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
+                  {(()=>{
+                    const sourceKeys = (membersFields && membersFields.length ? membersFields : Object.keys(memberForm||{}))
+                    const keys = [...sourceKeys]
+                    if(!keys.includes('OFFICIAL_MEMBER_ID') && !keys.includes('official_member_id')){
+                      const insertAt = keys.includes('MEMBER_NAME') ? (keys.indexOf('MEMBER_NAME') + 1) : 1
+                      keys.splice(Math.max(0, insertAt), 0, 'OFFICIAL_MEMBER_ID')
+                    }
+                    const moveKey = (arr, keyName, toIndex)=>{
+                      const idx = arr.indexOf(keyName)
+                      if(idx < 0) return
+                      const [item] = arr.splice(idx, 1)
+                      arr.splice(Math.max(0, toIndex), 0, item)
+                    }
+                    if(keys.includes('MEMBER_NAME')) moveKey(keys, 'MEMBER_NAME', 0)
+                    if(keys.includes('OFFICIAL_MEMBER_ID')) moveKey(keys, 'OFFICIAL_MEMBER_ID', 1)
+                    else if(keys.includes('official_member_id')) moveKey(keys, 'official_member_id', 1)
+
+                    return keys.map(key=>{
                     if(['id','created_at','church','MEMBER_ID','member_id','sno','STATUS_UPDATED_AT'].includes(key)) return null
+                    if(['GROUP_NAME','group_name','GROUP_ALIAS','group_alias','DEFAULT_GROUP_ALIAS','default_group_alias','GROUP_LEADER_ID','group_leader_id','DEFAULT_GROUP_LEADER_ID','default_group_leader_id'].includes(key) && !showMemberGroupInfo) return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
                     let control = null
                     let mappedDisplay = null
@@ -3684,7 +3725,24 @@ export default function App(){
                     } else if(key==='TRANSFER_DATE' || key==='transfer_date'){
                       const v = val? new Date(val).toISOString().slice(0,10) : ''
                       control = <input type='date' value={v} onChange={e=> setMemberForm(prev=>({...prev, [key]: e.target.value || null}))} style={{width:'100%'}} />
-                    } else if(key==='FAMILY_ID' || key==='family_id' || key==='GROUP_LEADER_ID' || key==='group_leader_id'){
+                    } else if(key==='OFFICIAL_MEMBER_ID' || key==='official_member_id'){
+                      control = (
+                        <input placeholder={key} value={val||''} type='number' onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value===''? null: Number(e.target.value) }))} style={{width:'100%'}} />
+                      )
+                      const selectedMemberId = val
+                      mappedDisplay = (
+                        <select value={selectedMemberId||''} onChange={e=>{
+                          const selected = e.target.value
+                          const memberId = selected === '' ? null : Number(selected)
+                          setMemberForm(prev=>({...prev,[key]: memberId}))
+                        }} style={{width:'100%'}}>
+                          <option value=''>-- select unique member --</option>
+                          {(members || []).map(m=> (
+                            <option key={m.id} value={m.MEMBER_ID || ''}>{(m.MEMBER_NAME || '')} (ID: {m.MEMBER_ID || 'N/A'})</option>
+                          ))}
+                        </select>
+                      )
+                    } else if(key==='FAMILY_ID' || key==='family_id' || key==='GROUP_LEADER_ID' || key==='group_leader_id' || key==='DEFAULT_GROUP_LEADER_ID' || key==='default_group_leader_id'){
                       const isGroup = key.toLowerCase().includes('group')
                       const displayControl = (
                         <input placeholder={key} value={val||''} type='number' onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value===''? null: Number(e.target.value) }))} style={{width:'100%'}} />
@@ -3722,7 +3780,8 @@ export default function App(){
                         </div>
                       </React.Fragment>
                     )
-                  })}
+                  })
+                  })()}
                 </div>
                 <div style={{marginTop:8}}>
                   <button onClick={async ()=>{
@@ -3746,11 +3805,12 @@ export default function App(){
                       }
                       setShowMemberForm(false);
                       setEditingMember(null);
+                      setShowMemberGroupInfo(false);
                       setMemberForm({});
                       await fetchMembers('');
                     }catch(e){ setStatus('Save failed: '+e.message) }
                   }}>Save</button>
-                  <button onClick={()=>{ setShowMemberForm(false); setEditingMember(null); setMemberForm({}) }} style={{marginLeft:8}}>Cancel</button>
+                  <button onClick={()=>{ setShowMemberForm(false); setEditingMember(null); setShowMemberGroupInfo(false); setMemberForm({}) }} style={{marginLeft:8}}>Cancel</button>
                 </div>
               </div>
             )}
