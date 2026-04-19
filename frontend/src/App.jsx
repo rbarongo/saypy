@@ -1831,6 +1831,75 @@ export default function App(){
     return grouped
   }
 
+  function getScopedCollectionCodeDefs(){
+    const defs = Array.isArray(collectionCodes) ? collectionCodes : []
+    const scoped = defs.filter((c)=> c && c.column_name)
+    const preferredByColumn = new Map()
+    scoped.forEach((c)=>{
+      const key = String(c.column_name || '').trim().toLowerCase()
+      if(!key) return
+      const current = preferredByColumn.get(key)
+      const candidateChurch = c.church == null ? null : Number(c.church)
+      const currentChurch = current && current.church != null ? Number(current.church) : null
+      const isCandidateLocal = candidateChurch != null && Number(candidateChurch) === Number(currentUserChurchId)
+      const isCurrentLocal = currentChurch != null && Number(currentChurch) === Number(currentUserChurchId)
+      if(!current || (!isCurrentLocal && isCandidateLocal)){
+        preferredByColumn.set(key, c)
+      }
+    })
+    return Array.from(preferredByColumn.values())
+  }
+
+  function normalizeScopeConfig(scopeRaw, splitPctRaw){
+    const scope = String(scopeRaw || '').trim().toLowerCase()
+    const pctNum = Number(splitPctRaw)
+    const splitPct = Number.isFinite(pctNum) ? Math.min(100, Math.max(0, pctNum)) : 0
+    if(scope === 'conference') return { mode: 'conference', splitPct: 100 }
+    if(scope === 'split') return { mode: 'split', splitPct }
+    return { mode: 'local', splitPct: 0 }
+  }
+
+  function buildDailyTotalsFromCollectionFields(rows){
+    const defs = getScopedCollectionCodeDefs()
+    const arr = Array.isArray(rows) ? rows : []
+    if(!arr.length || !defs.length) return []
+
+    const grouped = {}
+    arr.forEach((row)=>{
+      const dayKey = normalizeDateText(row?.s2) || 'Unknown date'
+      if(!grouped[dayKey]) grouped[dayKey] = { date: dayKey, local: 0, conference: 0, total: 0, entries: 0 }
+
+      let rowHasAmount = false
+      defs.forEach((def)=>{
+        const col = String(def?.column_name || '').trim()
+        if(!col) return
+        const amount = safeNumber(row?.[col])
+        if(amount === 0) return
+        rowHasAmount = true
+        const cfg = normalizeScopeConfig(def?.scope, def?.conference_split_pct)
+        if(cfg.mode === 'conference'){
+          grouped[dayKey].conference += amount
+        }else if(cfg.mode === 'split'){
+          const conferenceShare = amount * (cfg.splitPct / 100)
+          grouped[dayKey].conference += conferenceShare
+          grouped[dayKey].local += amount - conferenceShare
+        }else{
+          grouped[dayKey].local += amount
+        }
+        grouped[dayKey].total += amount
+      })
+
+      if(rowHasAmount) grouped[dayKey].entries += 1
+    })
+
+    const orderedKeys = Object.keys(grouped).sort((a, b)=>{
+      if(a === 'Unknown date' && b !== 'Unknown date') return 1
+      if(b === 'Unknown date' && a !== 'Unknown date') return -1
+      return String(a).localeCompare(String(b))
+    })
+    return orderedKeys.map((k)=> grouped[k]).filter((r)=> safeNumber(r.total) !== 0)
+  }
+
   function appendGroupedTotalsRow(rows, keyName, totalLabel = 'TOTAL'){
     const base = Array.isArray(rows) ? rows : []
     if(!base.length) return base
@@ -2074,19 +2143,22 @@ export default function App(){
     }
 
     if(selectedReportBuilder === 'daily_totals'){
-      const grouped = groupAndSum(entries, e=> e.date || 'Unknown date')
-      const orderedKeys = Object.keys(grouped).sort((a, b)=>{
-        if(a === 'Unknown date' && b !== 'Unknown date') return 1
-        if(b === 'Unknown date' && a !== 'Unknown date') return -1
-        return String(a).localeCompare(String(b))
-      })
-      const out = orderedKeys.map(date=> ({
-        date,
-        local: grouped[date].local,
-        conference: grouped[date].conference,
-        total: grouped[date].total,
-        entries: grouped[date].count,
-      }))
+      let out = buildDailyTotalsFromCollectionFields(reportRows)
+      if(!out.length){
+        const grouped = groupAndSum(entries, e=> e.date || 'Unknown date')
+        const orderedKeys = Object.keys(grouped).sort((a, b)=>{
+          if(a === 'Unknown date' && b !== 'Unknown date') return 1
+          if(b === 'Unknown date' && a !== 'Unknown date') return -1
+          return String(a).localeCompare(String(b))
+        })
+        out = orderedKeys.map(date=> ({
+          date,
+          local: grouped[date].local,
+          conference: grouped[date].conference,
+          total: grouped[date].total,
+          entries: grouped[date].count,
+        }))
+      }
       const outWithTotal = appendGroupedTotalsRow(out, 'date')
       setBuiltReportColumns(['date', 'entries', 'local', 'conference', 'total'])
       setBuiltReportRows(outWithTotal)
