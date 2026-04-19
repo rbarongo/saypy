@@ -1292,6 +1292,8 @@ export default function App(){
       MEMBER_ID: 'Member ID',
       FAMILY_ID: 'Family',
       family_id: 'Family',
+      DEFAULT_FAMILY_ID: 'Default Family',
+      default_family_id: 'Default Family',
       OFFICIAL_MEMBER_ID: 'Unique Member ID',
       official_member_id: 'Unique Member ID',
       GROUP_NAME: 'Group Name',
@@ -3635,28 +3637,6 @@ export default function App(){
             {showMemberForm && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
-                <div style={{marginBottom:12}}>
-                  <label style={{display:'inline-flex',alignItems:'center',gap:10,fontSize:14,fontWeight:800,color:'#0b1f3a',background:'#e2e8f0',border:'1px solid #94a3b8',borderRadius:8,padding:'8px 12px'}}>
-                    <input
-                      type='checkbox'
-                      checked={showMemberGroupInfo}
-                      onChange={e=>setShowMemberGroupInfo(Boolean(e.target.checked))}
-                      style={{width:18,height:18,accentColor:'#0f2d5c',cursor:'pointer'}}
-                    />
-                    Show Group Information
-                  </label>
-                </div>
-                <div style={{marginBottom:12}}>
-                  <label style={{display:'inline-flex',alignItems:'center',gap:10,fontSize:14,fontWeight:800,color:'#0b1f3a',background:'#e2e8f0',border:'1px solid #94a3b8',borderRadius:8,padding:'8px 12px'}}>
-                    <input
-                      type='checkbox'
-                      checked={showMembershipInfo}
-                      onChange={e=>setShowMembershipInfo(Boolean(e.target.checked))}
-                      style={{width:18,height:18,accentColor:'#0f2d5c',cursor:'pointer'}}
-                    />
-                    Show Membership Information
-                  </label>
-                </div>
                 <div style={{display:'grid',gridTemplateColumns:'160px 1fr 1fr',gap:16,alignItems:'start'}}>
                   {(()=>{
                     const sourceKeys = (membersFields && membersFields.length ? membersFields : Object.keys(memberForm||{}))
@@ -3758,7 +3738,7 @@ export default function App(){
                           ))}
                         </select>
                       )
-                    } else if(key==='FAMILY_ID' || key==='family_id' || key==='GROUP_LEADER_ID' || key==='group_leader_id' || key==='DEFAULT_GROUP_LEADER_ID' || key==='default_group_leader_id'){
+                    } else if(key==='FAMILY_ID' || key==='family_id' || key==='DEFAULT_FAMILY_ID' || key==='default_family_id' || key==='GROUP_LEADER_ID' || key==='group_leader_id' || key==='DEFAULT_GROUP_LEADER_ID' || key==='default_group_leader_id'){
                       const isGroup = key.toLowerCase().includes('group')
                       const displayControl = (
                         <input placeholder={key} value={val||''} type='number' onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value===''? null: Number(e.target.value) }))} style={{width:'100%'}} />
@@ -3798,6 +3778,26 @@ export default function App(){
                     )
                   })
                   })()}
+                </div>
+                <div style={{marginTop:8,marginBottom:8,display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12,fontWeight:600,color:'#0f172a'}}>
+                    <input
+                      type='checkbox'
+                      checked={showMemberGroupInfo}
+                      onChange={e=>setShowMemberGroupInfo(Boolean(e.target.checked))}
+                      style={{width:14,height:14,accentColor:'#0f2d5c',cursor:'pointer'}}
+                    />
+                    Show Group Information
+                  </label>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12,fontWeight:600,color:'#0f172a'}}>
+                    <input
+                      type='checkbox'
+                      checked={showMembershipInfo}
+                      onChange={e=>setShowMembershipInfo(Boolean(e.target.checked))}
+                      style={{width:14,height:14,accentColor:'#0f2d5c',cursor:'pointer'}}
+                    />
+                    Show Membership Information
+                  </label>
                 </div>
                 <div style={{marginTop:8}}>
                   <button onClick={async ()=>{
