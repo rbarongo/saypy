@@ -21,6 +21,7 @@ Adding a new report
 from __future__ import annotations
 
 from typing import Optional
+import math
 
 import pandas as pd
 from sqlalchemy import text
@@ -176,11 +177,13 @@ def compute_period_summary(
     df = pd.read_sql_table('members_collection', con=engine)
 
     if actor_church is not None and 'church' in df.columns:
-        df = df[
-            df['church'].apply(
-                lambda v: v is None or pd.isna(v) or int(v) == int(actor_church)
-            )
-        ]
+        try:
+            actor_church_num = int(actor_church)
+        except Exception:
+            actor_church_num = None
+        if actor_church_num is not None:
+            church_series = pd.to_numeric(df['church'], errors='coerce')
+            df = df[(church_series.isna()) | (church_series == actor_church_num)]
 
     if 's2' in df.columns and (start_date or end_date):
         df['s2'] = pd.to_datetime(df['s2'], errors='coerce')
@@ -241,6 +244,8 @@ def compute_period_summary(
             v = row.get(col_lower)
             try:
                 amount = float(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else 0.0
+                if not math.isfinite(amount):
+                    amount = 0.0
             except Exception:
                 amount = 0.0
 
@@ -249,6 +254,8 @@ def compute_period_summary(
             for nc in all_numeric_cols:
                 try:
                     nv = float(row.get(nc) or 0)
+                    if not math.isfinite(nv):
+                        continue
                     if nv != 0:
                         amount = nv
                         break
