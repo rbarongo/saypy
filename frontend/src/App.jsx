@@ -1491,6 +1491,7 @@ export default function App(){
   const [selectedContributorName, setSelectedContributorName] = useState('')
   const [aggRows, setAggRows] = useState([])
   const [selectedReportBuilder, setSelectedReportBuilder] = useState('meeting_summary')
+  const [builtReportType, setBuiltReportType] = useState(null)
   const [builtReportRows, setBuiltReportRows] = useState([])
   const [builtReportColumns, setBuiltReportColumns] = useState([])
   const [itemTotalsByDateRows, setItemTotalsByDateRows] = useState([])
@@ -1562,6 +1563,7 @@ export default function App(){
       if(!res.ok){ setStatus('Report failed: '+(data.detail||data.error||JSON.stringify(data))); setReportRows([]); return }
       if(!Array.isArray(data)){ setStatus('Report returned unexpected response'); setReportRows([]); return }
       setReportRows(data)
+      setBuiltReportType(null)
       setBuiltReportRows([])
       setBuiltReportColumns([])
       setMeetingSummaryRows([])
@@ -1572,6 +1574,15 @@ export default function App(){
   function safeNumber(v){
     const n = Number(v)
     return Number.isFinite(n) ? n : 0
+  }
+
+  function resetBuiltReportOutput(){
+    setBuiltReportType(null)
+    setBuiltReportRows([])
+    setBuiltReportColumns([])
+    setItemTotalsByDateRows([])
+    setMeetingSummaryRows([])
+    setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
   }
 
   function hasReportCellData(v){
@@ -2248,6 +2259,7 @@ export default function App(){
 
   async function buildSelectedReport(builderOverride = null, contributorOverride = null){
     const activeBuilder = builderOverride || selectedReportBuilder
+    resetBuiltReportOutput()
     if(activeBuilder === 'daily_totals'){
       try{
         let url = 'http://localhost:8000/reports/daily_summary'
@@ -2260,15 +2272,12 @@ export default function App(){
         if(!res.ok) throw new Error(data?.detail || JSON.stringify(data))
         const rows = Array.isArray(data?.rows) ? data.rows : []
         const outWithTotal = appendGroupedTotalsRow(rows, 'date')
+        setBuiltReportType(activeBuilder)
         setBuiltReportColumns(['date', 'conference', 'local', 'total'])
         setBuiltReportRows(outWithTotal)
-        setItemTotalsByDateRows([])
-        setMeetingSummaryRows([])
-        setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
         setStatus('Daily totals report built successfully.')
       }catch(e){
-        setBuiltReportRows([])
-        setBuiltReportColumns([])
+        resetBuiltReportOutput()
         setStatus('Daily totals report failed: ' + (e?.message || String(e)))
       }
       return
@@ -2276,11 +2285,6 @@ export default function App(){
 
     const entries = buildReportEntries()
     if(!entries.length){
-      setBuiltReportRows([])
-      setBuiltReportColumns([])
-      setItemTotalsByDateRows([])
-      setMeetingSummaryRows([])
-      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus('No report data found for the selected filters.')
       return
     }
@@ -2304,11 +2308,9 @@ export default function App(){
             entry_method: e.entry_method,
           }
         ))
+      setBuiltReportType(activeBuilder)
       setBuiltReportColumns(['date', 'receipt_no', 'contributor', 'item_name', 'category', 'amount', 'entry_method'])
       setBuiltReportRows(out)
-      setItemTotalsByDateRows([])
-      setMeetingSummaryRows([])
-      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus(`Detailed entries report built successfully (${out.length} rows).`)
       return
     }
@@ -2328,11 +2330,10 @@ export default function App(){
       })
       const outWithTotal = appendGroupedTotalsRow(out, 'item')
       const byDateWithTotal = appendGroupedTotalsRow(buildDateGroupedCollectionTotals(entries), 'date')
+      setBuiltReportType(activeBuilder)
       setBuiltReportColumns(['item', 'entries', 'local', 'conference', 'total'])
       setBuiltReportRows(outWithTotal)
       setItemTotalsByDateRows(byDateWithTotal)
-      setMeetingSummaryRows([])
-      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus('Collection item totals report built successfully.')
       return
     }
@@ -2345,29 +2346,17 @@ export default function App(){
         if(contributor) setSelectedContributorName(contributor)
       }
       if(!contributor){
-        setBuiltReportColumns([])
-        setBuiltReportRows([])
-        setItemTotalsByDateRows([])
-        setMeetingSummaryRows([])
-        setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
         setStatus('No contributor names found in the current report rows.')
         return
       }
       const matrix = buildContributorDateItemMatrix(entries, contributor)
       if(!matrix.rows.length){
-        setBuiltReportColumns([])
-        setBuiltReportRows([])
-        setItemTotalsByDateRows([])
-        setMeetingSummaryRows([])
-        setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
         setStatus(`No contributions found for contributor: ${contributor}`)
         return
       }
+      setBuiltReportType(activeBuilder)
       setBuiltReportColumns(matrix.columns)
       setBuiltReportRows(matrix.rows)
-      setItemTotalsByDateRows([])
-      setMeetingSummaryRows([])
-      setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus(`Contributor totals report built successfully for ${contributor}.`)
       return
     }
@@ -2387,9 +2376,7 @@ export default function App(){
 
     setMeetingSummaryRows(rows)
     setMeetingSummaryTotals(totals)
-    setBuiltReportColumns([])
-    setBuiltReportRows([])
-    setItemTotalsByDateRows([])
+    setBuiltReportType('meeting_summary')
     setStatus('Meeting summary form built successfully.')
   }
 
@@ -2582,14 +2569,15 @@ export default function App(){
   }
 
   function currentBuiltReportDataset(){
-    if(Array.isArray(builtReportRows) && builtReportRows.length && Array.isArray(builtReportColumns) && builtReportColumns.length){
+    if(builtReportType && builtReportType !== 'meeting_summary' && Array.isArray(builtReportRows) && builtReportRows.length && Array.isArray(builtReportColumns) && builtReportColumns.length){
       return {
-        title: reportBuilderOptions.find(r=> r.id===selectedReportBuilder)?.title || 'Built Report',
+        builderId: builtReportType,
+        title: reportBuilderOptions.find(r=> r.id===builtReportType)?.title || 'Built Report',
         columns: builtReportColumns,
         rows: builtReportRows,
       }
     }
-    if(Array.isArray(meetingSummaryRows) && meetingSummaryRows.length){
+    if(builtReportType === 'meeting_summary' && Array.isArray(meetingSummaryRows) && meetingSummaryRows.length){
       const rows = [...meetingSummaryRows, {
         item: 'TOTAL',
         local: meetingSummaryTotals?.local || 0,
@@ -2597,6 +2585,7 @@ export default function App(){
         total: meetingSummaryTotals?.total || 0,
       }]
       return {
+        builderId: 'meeting_summary',
         title: 'Meeting Summary Form',
         columns: ['item', 'local', 'conference', 'total'],
         rows,
@@ -2605,21 +2594,21 @@ export default function App(){
     return null
   }
 
-  function labelForBuiltReportColumn(col, datasetTitle = ''){
+  function labelForBuiltReportColumn(col, datasetTitle = '', builderId = builtReportType){
     const key = String(col || '').trim().toLowerCase()
-    const isDailyTotals = selectedReportBuilder === 'daily_totals' || String(datasetTitle || '').toLowerCase().includes('daily totals')
+    const isDailyTotals = builderId === 'daily_totals' || String(datasetTitle || '').toLowerCase().includes('daily totals')
     if(isDailyTotals && key === 'date') return 'Date'
     if(isDailyTotals && key === 'conference') return 'Conference Amount'
     if(isDailyTotals && key === 'local') return `${currentChurchName()} Amount`
     if(isDailyTotals && key === 'total') return 'Total Amount'
-    if(selectedReportBuilder === 'contributor_totals' && key === 'date') return 'Date'
-    if(selectedReportBuilder === 'contributor_totals' && key === 'row_total') return 'Total'
+    if(builderId === 'contributor_totals' && key === 'date') return 'Date'
+    if(builderId === 'contributor_totals' && key === 'row_total') return 'Total'
     return labelForColumn(col)
   }
 
-  function isBuiltReportNumericColumn(col){
+  function isBuiltReportNumericColumn(col, builderId = builtReportType){
     if(['amount','local','conference','total'].includes(String(col))) return true
-    if(selectedReportBuilder === 'contributor_totals' && String(col) !== 'date') return true
+    if(builderId === 'contributor_totals' && String(col) !== 'date') return true
     return false
   }
 
@@ -2627,7 +2616,7 @@ export default function App(){
     try{
       const dataset = currentBuiltReportDataset()
       if(!dataset){ setStatus('Build a report first before export.'); return }
-      const prettyCols = dataset.columns.map(c=>labelForBuiltReportColumn(c, dataset.title))
+      const prettyCols = dataset.columns.map(c=>labelForBuiltReportColumn(c, dataset.title, dataset.builderId))
       const rows = [
         [dataset.title],
         [`Church: ${currentChurchName()}`],
@@ -2638,7 +2627,7 @@ export default function App(){
       dataset.rows.forEach(row=>{
         rows.push(dataset.columns.map(col=> row?.[col] ?? ''))
       })
-      if(selectedReportBuilder === 'item_totals' && Array.isArray(itemTotalsByDateRows) && itemTotalsByDateRows.length){
+      if(dataset.builderId === 'item_totals' && Array.isArray(itemTotalsByDateRows) && itemTotalsByDateRows.length){
         rows.push([])
         rows.push(['Collection Item Totals By Date'])
         rows.push(['Date', 'Items With Values', 'Local', 'Conference', 'Total'])
@@ -2670,10 +2659,10 @@ export default function App(){
       doc.setFontSize(10)
       doc.text(`Church: ${currentChurchName()}`, 36, 52)
       doc.text(`Period: ${reportFrom || 'All'} to ${reportTo || 'All'}`, 36, 66)
-      const head = [dataset.columns.map(c=>labelForBuiltReportColumn(c, dataset.title))]
+      const head = [dataset.columns.map(c=>labelForBuiltReportColumn(c, dataset.title, dataset.builderId))]
       const body = dataset.rows.map(row=> dataset.columns.map(col=>{
         const v = row?.[col]
-        return isBuiltReportNumericColumn(col) ? formatNumber(v) : String(v ?? '')
+        return isBuiltReportNumericColumn(col, dataset.builderId) ? formatNumber(v) : String(v ?? '')
       }))
       autoTable(doc, {
         startY: 78,
@@ -2683,7 +2672,7 @@ export default function App(){
         headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold' },
         styles: { fontSize: 9, textColor: [15, 23, 42] },
       })
-      if(selectedReportBuilder === 'item_totals' && Array.isArray(itemTotalsByDateRows) && itemTotalsByDateRows.length){
+      if(dataset.builderId === 'item_totals' && Array.isArray(itemTotalsByDateRows) && itemTotalsByDateRows.length){
         const nextY = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : 78) + 18
         doc.setFontSize(11)
         doc.text('Collection Item Totals By Date', 36, nextY)
@@ -4198,10 +4187,13 @@ export default function App(){
                   ))}
                 </div>
                 <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
-                  <button type='button' onClick={buildSelectedReport}>Build Selected Report</button>
+                  <button type='button' onClick={()=>buildSelectedReport(selectedReportBuilder, selectedContributorName)}>Build Selected Report</button>
                   <button type='button' onClick={exportBuiltReportPdf}>Export Built PDF</button>
                   <button type='button' onClick={exportBuiltReportExcel}>Export Built CSV</button>
                   <span style={{fontSize:12, color:'#64748b'}}>Selected: {reportBuilderOptions.find(r=> r.id===selectedReportBuilder)?.title}</span>
+                  <span style={{fontSize:12, color: builtReportType ? '#0f172a' : '#94a3b8', fontWeight:700}}>
+                    Last built: {builtReportType ? (reportBuilderOptions.find(r=> r.id===builtReportType)?.title || builtReportType) : 'None'}
+                  </span>
                 </div>
                 {selectedReportBuilder === 'contributor_totals' && (
                   <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginTop:8}}>
@@ -4362,13 +4354,13 @@ export default function App(){
                         {builtReportRows.slice(0, reportMaxRows).map((row, idx)=> (
                           <tr
                             key={idx}
-                            style={selectedReportBuilder === 'contributor_totals' && String(row?.date || '').toUpperCase() === 'TOTAL'
+                            style={builtReportType === 'contributor_totals' && String(row?.date || '').toUpperCase() === 'TOTAL'
                               ? {fontWeight:800, background:'#f8fafc'}
                               : undefined}
                           >
                             {builtReportColumns.map(col=> (
                               <td key={col} style={{padding:6}}>
-                                {isBuiltReportNumericColumn(col) ? formatNumber(row[col]) : String(row[col] ?? '')}
+                                {isBuiltReportNumericColumn(col, builtReportType) ? formatNumber(row[col]) : String(row[col] ?? '')}
                               </td>
                             ))}
                           </tr>
@@ -4376,7 +4368,7 @@ export default function App(){
                       </tbody>
                     </table>
                   </div>
-                  {selectedReportBuilder === 'item_totals' && itemTotalsByDateRows.length > 0 && (
+                  {builtReportType === 'item_totals' && itemTotalsByDateRows.length > 0 && (
                     <div style={{marginTop:10}}>
                       <h5 style={{margin:'6px 0', color:'#0f172a'}}>Collection Item Totals By Date</h5>
                       <div style={mainGridWrapStyle(260)}>
