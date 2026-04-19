@@ -3604,13 +3604,14 @@ export default function App(){
             {showMemberForm && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
-                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <div style={{display:'grid',gridTemplateColumns:'minmax(180px, 260px) minmax(240px, 1fr)',gap:'10px 12px',alignItems:'center'}}>
                   {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
                     if(key==='id' || key==='created_at') return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
+                    let control = null
                     if(key==='STATUS'){
-                      return (
-                        <select key={key} value={val||''} onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value || null}))}>
+                      control = (
+                        <select value={val||''} onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value || null}))} style={{width:'100%'}}>
                           <option value=''>-- status --</option>
                           <option value='active'>active</option>
                           <option value='inactive by transfer'>inactive by transfer</option>
@@ -3619,30 +3620,28 @@ export default function App(){
                           <option value='inactive unknown reason'>inactive unknown reason</option>
                         </select>
                       )
-                    }
-                    if(key==='church'){
-                      return (
-                        <select key={key} value={val||''} onChange={e=>{
+                    } else if(key==='church'){
+                      control = (
+                        <select value={val||''} onChange={e=>{
                           const selected = e.target.value
                           if(!canAccessChurch(selected)){ denyRestrictedChurchAccess('member data'); return }
                           setMemberForm(prev=>({...prev,[key]: selected}))
-                        }}>
+                        }} style={{width:'100%'}}>
                           <option value=''>-- church --</option>
                           {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
                         </select>
                       )
-                    }
-                    if(key==='TRANSFER_TO_CHURCH' || key==='transfer_to_church'){
+                    } else if(key==='TRANSFER_TO_CHURCH' || key==='transfer_to_church'){
                       const canCreateChurch = String(user?.role || '').toLowerCase() === 'system_admin' || String(user?.username || '').toLowerCase() === 'saypy_admin'
                       const selectedTransferChurch = memberForm?.TRANSFER_TO_CHURCH ?? memberForm?.transfer_to_church ?? ''
-                      return (
-                        <div key={key} style={{display:'flex',flexDirection:'column',gap:6,minWidth:260}}>
+                      control = (
+                        <div style={{display:'flex',flexDirection:'column',gap:6,minWidth:260}}>
                           <select value={selectedTransferChurch || ''} onChange={e=>{
                             const selected = e.target.value
                             if(!canAccessChurch(selected)){ denyRestrictedChurchAccess('member transfer'); return }
                             const mapped = selected === '' ? null : Number(selected)
                             setMemberForm(prev=>({...prev, TRANSFER_TO_CHURCH: mapped, transfer_to_church: mapped}))
-                          }}>
+                          }} style={{width:'100%'}}>
                             <option value=''>-- transfer to church --</option>
                             {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
                           </select>
@@ -3666,14 +3665,21 @@ export default function App(){
                           )}
                         </div>
                       )
-                    }
-                    if(key==='TRANSFER_DATE' || key==='transfer_date'){
+                    } else if(key==='TRANSFER_DATE' || key==='transfer_date'){
                       const v = val? new Date(val).toISOString().slice(0,10) : ''
-                      return <input key={key} type='date' value={v} onChange={e=> setMemberForm(prev=>({...prev, [key]: e.target.value || null}))} />
+                      control = <input type='date' value={v} onChange={e=> setMemberForm(prev=>({...prev, [key]: e.target.value || null}))} style={{width:'100%'}} />
+                    } else {
+                      const isNumber = typeof val === 'number' || key.toLowerCase().includes('id') || key.toLowerCase().includes('sno') || key.toLowerCase().includes('pledge')
+                      control = (
+                        <input placeholder={key} value={val||''} type={isNumber? 'number':'text'} onChange={e=>setMemberForm(prev=>({...prev,[key]: isNumber? (e.target.value===''? null: Number(e.target.value)) : e.target.value }))} style={{width:'100%'}} />
+                      )
                     }
-                    const isNumber = typeof val === 'number' || key.toLowerCase().includes('id') || key.toLowerCase().includes('sno') || key.toLowerCase().includes('pledge')
+
                     return (
-                      <input key={key} placeholder={key} value={val||''} type={isNumber? 'number':'text'} onChange={e=>setMemberForm(prev=>({...prev,[key]: isNumber? (e.target.value===''? null: Number(e.target.value)) : e.target.value }))} />
+                      <React.Fragment key={key}>
+                        <label style={{fontSize:13,fontWeight:700,color:'#0f172a'}}>{memberLabelForColumn(key)}</label>
+                        {control}
+                      </React.Fragment>
                     )
                   })}
                 </div>
