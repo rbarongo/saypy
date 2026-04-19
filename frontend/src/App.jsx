@@ -686,6 +686,12 @@ export default function App(){
   // Members UI local state (was missing and caused runtime errors)
   const [showMemberForm, setShowMemberForm] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
+  // Map Member / Map Families state
+  const [mapMode, setMapMode] = useState(null) // null | 'member' | 'family'
+  const [mapTargetMember, setMapTargetMember] = useState(null)
+  const [mapFilter, setMapFilter] = useState('')
+  const [mapRight, setMapRight] = useState([]) // array of member objects on RHS
+  const [mapDesignated, setMapDesignated] = useState(null) // id of designated unique/family name
   const [memberForm, setMemberForm] = useState({})
   const [showMemberGroupInfo, setShowMemberGroupInfo] = useState(false)
   const [showMembershipInfo, setShowMembershipInfo] = useState(false)
@@ -3634,12 +3640,18 @@ export default function App(){
                         {memberLabelForColumn(h)} {membersSortKey===h ? (membersSortDir==='asc' ? '▲' : '▼') : ''}
                       </th>
                     ))}
+                    <th style={{whiteSpace:'nowrap'}}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredMembers.slice(0, membersMaxRows).map(m=> (
-                    <tr key={m.id} onClick={()=>{ setEditingMember(m); setMemberForm({...m}); setShowMemberGroupInfo(false); setShowMembershipInfo(false); setShowMemberForm(true); }} style={{cursor:'pointer'}}>
+                    <tr key={m.id}>
                       {getMembersDisplayColumns().map(h=> <td key={h}>{memberDisplayCellValue(h, m)}</td>)}
+                      <td style={{whiteSpace:'nowrap'}}>
+                        <button style={{fontSize:11,padding:'2px 6px',marginRight:4}} onClick={()=>{ setEditingMember(m); setMemberForm({...m}); setShowMemberGroupInfo(false); setShowMembershipInfo(false); setShowMemberForm(true); setMapMode(null); }}>Edit</button>
+                        <button style={{fontSize:11,padding:'2px 6px',marginRight:4}} onClick={()=>{ setMapTargetMember(m); setMapMode('member'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setShowMemberForm(false); }}>Map Member</button>
+                        <button style={{fontSize:11,padding:'2px 6px'}} onClick={()=>{ setMapTargetMember(m); setMapMode('family'); setMapFilter(''); setMapRight([]); setMapDesignated(null); setShowMemberForm(false); }}>Map Families</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -3975,6 +3987,197 @@ export default function App(){
                 </div>
               </div>
             )}
+
+            {/* ── Map Member panel ── */}
+            {mapMode === 'member' && mapTargetMember && (()=>{
+              const targetName = String(mapTargetMember.MEMBER_NAME || mapTargetMember.member_name || '').trim()
+              const lowerFilter = mapFilter.toLowerCase()
+              const rightIds = new Set(mapRight.map(r => r.id))
+              const lhsPool = (members || []).filter(m => {
+                if(rightIds.has(m.id)) return false
+                if(!lowerFilter) return true
+                return String(m.MEMBER_NAME || m.member_name || '').toLowerCase().includes(lowerFilter)
+              })
+              return (
+                <div style={{marginTop:12,border:'2px solid #3b82f6',borderRadius:8,padding:12}}>
+                  <h4 style={{margin:'0 0 8px',color:'#1e40af'}}>Map Member — Unique Identity for: <strong>{targetName}</strong></h4>
+                  <p style={{fontSize:12,color:'#475569',margin:'0 0 8px'}}>Filter and transfer members to the right. Then click one name on the right to designate it as the <strong>Unique Identity</strong> (OFFICIAL_MEMBER_ID). All right-side members will be linked to that identity.</p>
+                  <div style={{display:'flex',gap:8,marginBottom:8,alignItems:'center'}}>
+                    <input placeholder='Filter members by name...' value={mapFilter} onChange={e=>setMapFilter(e.target.value)} style={{flex:1,padding:'4px 8px'}} />
+                    <button onClick={()=>setMapFilter('')} style={{fontSize:11}}>Clear</button>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',gap:8,alignItems:'start'}}>
+                    {/* LHS */}
+                    <div>
+                      <div style={{fontWeight:700,fontSize:12,marginBottom:4,color:'#374151'}}>Available Members ({lhsPool.length})</div>
+                      <div style={{height:320,overflowY:'auto',border:'1px solid #cbd5e1',borderRadius:4}}>
+                        {lhsPool.map(m=>{
+                          const nm = String(m.MEMBER_NAME||m.member_name||'').trim()
+                          const mid = m.MEMBER_ID||m.member_id||''
+                          return (
+                            <div key={m.id} style={{padding:'4px 8px',cursor:'pointer',borderBottom:'1px solid #e2e8f0',fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}
+                              onDoubleClick={()=>setMapRight(prev=>[...prev, m])}>
+                              <span>{nm}{mid ? ` (ID:${mid})` : ''}</span>
+                              <button style={{fontSize:10,padding:'1px 5px'}} onClick={()=>setMapRight(prev=>[...prev, m])}>→</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div style={{fontSize:11,color:'#6b7280',marginTop:4}}>Double-click or click → to transfer</div>
+                    </div>
+                    {/* Middle controls */}
+                    <div style={{display:'flex',flexDirection:'column',gap:6,paddingTop:40}}>
+                      <button onClick={()=>{ setMapRight(lhsPool); }} style={{fontSize:11}}>All →</button>
+                      <button onClick={()=>setMapRight([])} style={{fontSize:11}}>← All</button>
+                    </div>
+                    {/* RHS */}
+                    <div>
+                      <div style={{fontWeight:700,fontSize:12,marginBottom:4,color:'#374151'}}>Selected ({mapRight.length}) — click to designate unique name</div>
+                      <div style={{height:320,overflowY:'auto',border:'1px solid #cbd5e1',borderRadius:4}}>
+                        {mapRight.map(m=>{
+                          const nm = String(m.MEMBER_NAME||m.member_name||'').trim()
+                          const mid = m.MEMBER_ID||m.member_id||''
+                          const isDesignated = mapDesignated === m.id
+                          return (
+                            <div key={m.id}
+                              onClick={()=>setMapDesignated(m.id)}
+                              style={{padding:'4px 8px',cursor:'pointer',borderBottom:'1px solid #e2e8f0',fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center',
+                                background: isDesignated ? '#dbeafe' : 'white',
+                                fontWeight: isDesignated ? 700 : 400}}>
+                              <span>{isDesignated ? '★ ' : ''}{nm}{mid ? ` (ID:${mid})` : ''}</span>
+                              <button style={{fontSize:10,padding:'1px 5px'}} onClick={e=>{e.stopPropagation(); setMapRight(prev=>prev.filter(r=>r.id!==m.id)); if(mapDesignated===m.id) setMapDesignated(null);}}>✕</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      {mapDesignated && (()=>{
+                        const des = mapRight.find(r=>r.id===mapDesignated)
+                        return <div style={{fontSize:11,color:'#2563eb',marginTop:4,fontWeight:600}}>★ Designated unique name: {String(des?.MEMBER_NAME||des?.member_name||'').trim()}</div>
+                      })()}
+                    </div>
+                  </div>
+                  <div style={{marginTop:10,display:'flex',gap:8}}>
+                    <button disabled={!mapDesignated || mapRight.length===0} style={{background:'#2563eb',color:'white',border:'none',borderRadius:4,padding:'5px 14px',cursor:'pointer'}}
+                      onClick={async ()=>{
+                        try{
+                          const des = mapRight.find(r=>r.id===mapDesignated)
+                          const desOfficialId = Number(des?.MEMBER_ID||des?.member_id||0)
+                          if(!desOfficialId){ setStatus('Designated member has no MEMBER_ID'); return; }
+                          let ok=0
+                          for(const m of mapRight){
+                            const payload = {...m, OFFICIAL_MEMBER_ID: desOfficialId}
+                            const res = await authFetch(`http://localhost:8000/members/${m.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+                            if(res.ok) ok++
+                          }
+                          setStatus(`Map Member saved: ${ok}/${mapRight.length} updated with OFFICIAL_MEMBER_ID=${desOfficialId}`)
+                          setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null)
+                          await fetchMembers('')
+                        }catch(e){ setStatus('Map Member save failed: '+e.message) }
+                      }}>Save Unique Identity Mapping</button>
+                    <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); }}>Cancel</button>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* ── Map Families panel ── */}
+            {mapMode === 'family' && mapTargetMember && (()=>{
+              const targetName = String(mapTargetMember.MEMBER_NAME || mapTargetMember.member_name || '').trim()
+              const lowerFilter = mapFilter.toLowerCase()
+              const rightIds = new Set(mapRight.map(r => r.id))
+              // LHS: members with OFFICIAL_MEMBER_ID set (unique identified) — or all if none
+              const uniquePool = (members || []).filter(m => {
+                const uid = m.OFFICIAL_MEMBER_ID || m.official_member_id
+                return uid && Number(uid) > 0
+              })
+              const sourcePool = uniquePool.length > 0 ? uniquePool : (members || [])
+              const lhsPool = sourcePool.filter(m => {
+                if(rightIds.has(m.id)) return false
+                if(!lowerFilter) return true
+                return String(m.MEMBER_NAME || m.member_name || '').toLowerCase().includes(lowerFilter)
+              })
+              return (
+                <div style={{marginTop:12,border:'2px solid #16a34a',borderRadius:8,padding:12}}>
+                  <h4 style={{margin:'0 0 8px',color:'#15803d'}}>Map Families — Family Group for: <strong>{targetName}</strong></h4>
+                  <p style={{fontSize:12,color:'#475569',margin:'0 0 8px'}}>Filter and transfer members to the right. Then click one name on the right to designate as <strong>Family Name</strong> (FAMILY_ID). All right-side members will share that family group. LHS shows unique-identified members{uniquePool.length===0?' (none found — showing all members)':''}.</p>
+                  <div style={{display:'flex',gap:8,marginBottom:8,alignItems:'center'}}>
+                    <input placeholder='Filter members by name...' value={mapFilter} onChange={e=>setMapFilter(e.target.value)} style={{flex:1,padding:'4px 8px'}} />
+                    <button onClick={()=>setMapFilter('')} style={{fontSize:11}}>Clear</button>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',gap:8,alignItems:'start'}}>
+                    {/* LHS */}
+                    <div>
+                      <div style={{fontWeight:700,fontSize:12,marginBottom:4,color:'#374151'}}>Available Members ({lhsPool.length})</div>
+                      <div style={{height:320,overflowY:'auto',border:'1px solid #cbd5e1',borderRadius:4}}>
+                        {lhsPool.map(m=>{
+                          const nm = String(m.MEMBER_NAME||m.member_name||'').trim()
+                          const mid = m.MEMBER_ID||m.member_id||''
+                          const uid = m.OFFICIAL_MEMBER_ID||m.official_member_id||''
+                          return (
+                            <div key={m.id} style={{padding:'4px 8px',cursor:'pointer',borderBottom:'1px solid #e2e8f0',fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}
+                              onDoubleClick={()=>setMapRight(prev=>[...prev, m])}>
+                              <span>{nm}{mid ? ` (ID:${mid})` : ''}{uid ? ` [UID:${uid}]` : ''}</span>
+                              <button style={{fontSize:10,padding:'1px 5px'}} onClick={()=>setMapRight(prev=>[...prev, m])}>→</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div style={{fontSize:11,color:'#6b7280',marginTop:4}}>Double-click or click → to transfer</div>
+                    </div>
+                    {/* Middle */}
+                    <div style={{display:'flex',flexDirection:'column',gap:6,paddingTop:40}}>
+                      <button onClick={()=>setMapRight(lhsPool)} style={{fontSize:11}}>All →</button>
+                      <button onClick={()=>setMapRight([])} style={{fontSize:11}}>← All</button>
+                    </div>
+                    {/* RHS */}
+                    <div>
+                      <div style={{fontWeight:700,fontSize:12,marginBottom:4,color:'#374151'}}>Selected ({mapRight.length}) — click to designate family name</div>
+                      <div style={{height:320,overflowY:'auto',border:'1px solid #cbd5e1',borderRadius:4}}>
+                        {mapRight.map(m=>{
+                          const nm = String(m.MEMBER_NAME||m.member_name||'').trim()
+                          const mid = m.MEMBER_ID||m.member_id||''
+                          const isDesignated = mapDesignated === m.id
+                          return (
+                            <div key={m.id}
+                              onClick={()=>setMapDesignated(m.id)}
+                              style={{padding:'4px 8px',cursor:'pointer',borderBottom:'1px solid #e2e8f0',fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center',
+                                background: isDesignated ? '#dcfce7' : 'white',
+                                fontWeight: isDesignated ? 700 : 400}}>
+                              <span>{isDesignated ? '★ ' : ''}{nm}{mid ? ` (ID:${mid})` : ''}</span>
+                              <button style={{fontSize:10,padding:'1px 5px'}} onClick={e=>{e.stopPropagation(); setMapRight(prev=>prev.filter(r=>r.id!==m.id)); if(mapDesignated===m.id) setMapDesignated(null);}}>✕</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      {mapDesignated && (()=>{
+                        const des = mapRight.find(r=>r.id===mapDesignated)
+                        return <div style={{fontSize:11,color:'#16a34a',marginTop:4,fontWeight:600}}>★ Designated family name: {String(des?.MEMBER_NAME||des?.member_name||'').trim()}</div>
+                      })()}
+                    </div>
+                  </div>
+                  <div style={{marginTop:10,display:'flex',gap:8}}>
+                    <button disabled={!mapDesignated || mapRight.length===0} style={{background:'#16a34a',color:'white',border:'none',borderRadius:4,padding:'5px 14px',cursor:'pointer'}}
+                      onClick={async ()=>{
+                        try{
+                          const des = mapRight.find(r=>r.id===mapDesignated)
+                          const desFamilyId = Number(des?.MEMBER_ID||des?.member_id||0)
+                          if(!desFamilyId){ setStatus('Designated member has no MEMBER_ID'); return; }
+                          let ok=0
+                          for(const m of mapRight){
+                            const payload = {...m, FAMILY_ID: desFamilyId, DEFAULT_FAMILY_ID: desFamilyId}
+                            const res = await authFetch(`http://localhost:8000/members/${m.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+                            if(res.ok) ok++
+                          }
+                          setStatus(`Map Families saved: ${ok}/${mapRight.length} updated with FAMILY_ID=${desFamilyId}`)
+                          setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null)
+                          await fetchMembers('')
+                        }catch(e){ setStatus('Map Families save failed: '+e.message) }
+                      }}>Save Family Mapping</button>
+                    <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); }}>Cancel</button>
+                  </div>
+                </div>
+              )
+            })()}
 
           </div>
         )}
