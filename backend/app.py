@@ -32,6 +32,7 @@ from .db import (
     delete_role_policy,
     import_collection_codes_from_workbook,
     ensure_global_config_schema,
+    ensure_members_collection_schema,
     ensure_members_schema,
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -2255,6 +2256,15 @@ def on_startup():
         _ensure_collection_workflow_tables()
     except Exception:
         logger.exception('Failed to initialize collection workflow tables')
+
+    try:
+        added_cols = ensure_members_collection_schema()
+        if added_cols:
+            logger.info('members_collection schema migration added columns: %s', ', '.join(sorted(added_cols)))
+        else:
+            logger.info('members_collection schema migration: no columns added')
+    except Exception:
+        logger.exception('Failed to verify/migrate members_collection schema columns')
 
     # If members table exists but is empty, attempt to initialize from Members.xlsx
     try:

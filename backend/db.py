@@ -125,6 +125,9 @@ def insert_dataframe(df: pd.DataFrame, table_name: str = "members_collection") -
     ensure_db_exists()
     tn = (table_name or "").lower()
     if tn in ("members_collection", "members_collections"):
+        # Defensive migration hook: ensure workflow columns exist before appending rows.
+        ensure_members_collection_schema()
+    if tn in ("members_collection", "members_collections"):
         rows = df.to_dict(orient='records') if df is not None else []
         rows = normalize_members_collection_rows(rows, fill_missing_s3=True, recompute_s1=True)
         df = pd.DataFrame(rows)
@@ -1589,11 +1592,14 @@ def seed_collection_codes():
             pass
 
 
-def ensure_members_collection_schema():
-    """Ensure the `members_collection` table has the expected columns; add missing ones via ALTER TABLE."""
+def ensure_members_collection_schema() -> List[str]:
+    """Ensure the `members_collection` table has expected columns.
+
+    Returns a list of columns that were added in this call.
+    """
     inspector = inspect(engine)
     if 'members_collection' not in inspector.get_table_names():
-        return
+        return []
     existing = {c['name'] for c in inspector.get_columns('members_collection')}
     expected = {}
     # s fields
@@ -1626,6 +1632,7 @@ def ensure_members_collection_schema():
     expected['unlocked_at'] = 'DATETIME'
     expected['unlocked_by_user_id'] = 'INTEGER'
     missing = [k for k in expected.keys() if k not in existing]
+    added_cols: List[str] = []
 
     # Add each missing column
     for col in missing:
@@ -1637,7 +1644,11 @@ def ensure_members_collection_schema():
             else:
                 sql_type = col_type
         else:
-            sql_type = col_type
+            # Postgres-compatible type mapping for ALTER TABLE ADD COLUMN.
+            if col_type == 'DATETIME':
+                sql_type = 'TIMESTAMP'
+            else:
+                sql_type = col_type
 
         stmt = f'ALTER TABLE members_collection ADD COLUMN {col} {sql_type}'
         with engine.connect() as conn:
@@ -1647,6 +1658,7 @@ def ensure_members_collection_schema():
             except Exception:
                 # some dialects/engines auto-commit
                 pass
+        added_cols.append(col)
 
     # Ensure existing columns have compatible types for current business rules.
     # SQLAlchemy metadata updates do not alter existing DB column types automatically.
@@ -1660,6 +1672,8 @@ def ensure_members_collection_schema():
                 conn.execute(text('ALTER TABLE members_collection ALTER COLUMN s3 TYPE INTEGER USING CASE WHEN s3 IS NULL THEN NULL ELSE ROUND(s3)::INTEGER END'))
             except Exception:
                 pass
+
+    return added_cols
 
 
 def ensure_members_schema():
