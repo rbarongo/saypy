@@ -3619,7 +3619,7 @@ export default function App(){
             {showMemberForm && (
               <div style={{marginTop:12,border:'1px solid #ddd',padding:8}}>
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
-                <div style={{display:'grid',gridTemplateColumns:'minmax(160px, 200px) minmax(220px, 1fr) minmax(220px, 1fr)',gap:'10px 12px',alignItems:'start'}}>
+                <div style={{display:'grid',gridTemplateColumns:'160px 1fr 1fr',gap:16,alignItems:'start'}}>
                   {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
                     if(['id','created_at','church','MEMBER_ID','member_id','sno','STATUS_UPDATED_AT'].includes(key)) return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
@@ -3713,9 +3713,13 @@ export default function App(){
 
                     return (
                       <React.Fragment key={key}>
-                        <label style={{fontSize:13,fontWeight:700,color:'#0f172a'}}>{memberLabelForColumn(key)}</label>
-                        {control}
-                        {mappedDisplay || <div />}
+                        <label style={{fontSize:13,fontWeight:700,color:'#0f172a',paddingRight:12}}>{memberLabelForColumn(key)}</label>
+                        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                          {control}
+                        </div>
+                        <div>
+                          {mappedDisplay}
+                        </div>
                       </React.Fragment>
                     )
                   })}
