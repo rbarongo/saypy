@@ -3699,7 +3699,7 @@ export default function App(){
                     else if(keys.includes('official_member_id')) moveKey(keys, 'official_member_id', 1)
 
                     return keys.map(key=>{
-                    if(['id','created_at','church','MEMBER_ID','member_id','sno','STATUS_UPDATED_AT','status_updated_at','PHONE2','phone2'].includes(key)) return null
+                    if(['id','created_at','church','MEMBER_ID','member_id','STATUS_UPDATED_AT','status_updated_at','PHONE2','phone2'].includes(key)) return null
                     if(['GROUP_NAME','group_name','GROUP_ALIAS','group_alias','DEFAULT_GROUP_ALIAS','default_group_alias','GROUP_LEADER_ID','group_leader_id','DEFAULT_GROUP_LEADER_ID','default_group_leader_id'].includes(key) && !showMemberGroupInfo) return null
                     if(['TRANSFER_TO_CHURCH','transfer_to_church','TRANSFER_DATE','transfer_date'].includes(key) && !showMembershipInfo) return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
@@ -3764,6 +3764,17 @@ export default function App(){
                     } else if(key==='TRANSFER_DATE' || key==='transfer_date'){
                       const v = val? new Date(val).toISOString().slice(0,10) : ''
                       control = <input type='date' value={v} onChange={e=> setMemberForm(prev=>({...prev, [key]: e.target.value || null}))} style={{width:'100%'}} />
+                    } else if(key==='sno'){
+                      control = (
+                        <input
+                          placeholder={key}
+                          value={val ?? ''}
+                          type='number'
+                          readOnly
+                          disabled
+                          style={{width:'100%',background:'#e5e7eb',color:'#334155',fontWeight:700,cursor:'not-allowed'}}
+                        />
+                      )
                     } else if(key==='OFFICIAL_MEMBER_ID' || key==='official_member_id'){
                       control = (
                         <input placeholder={key} value={val||''} type='number' onChange={e=>setMemberForm(prev=>({...prev,[key]: e.target.value===''? null: Number(e.target.value) }))} style={{width:'100%'}} />
@@ -4080,7 +4091,7 @@ export default function App(){
                       onClick={async ()=>{
                         try{
                           const des = mapRight.find(r=>r.id===mapDesignated)
-                          const designatedMemberId = Number(des?.MEMBER_ID||des?.member_id||0)
+                          const designatedMemberId = Number(des?.MEMBER_ID||des?.member_id||des?.id||0)
                           if(!designatedMemberId){ setStatus('Designated member has no MEMBER_ID'); return; }
                           let ok=0
                           for(const m of mapRight){
@@ -4095,13 +4106,13 @@ export default function App(){
                             if(res.ok) ok++
                           }
                           setStatus(`Map Member saved: ${ok}/${mapRight.length} updated with MEMBER_ID=${designatedMemberId} and OFFICIAL_MEMBER_ID=${designatedMemberId}`)
-                          setMapSaveMessage('Mapping was saved successfully.')
+                          setMapSaveMessage('Mapping was successful.')
                           await fetchMembers('')
                         }catch(e){ setStatus('Map Member save failed: '+e.message) }
                       }}>Save Unique Identity Mapping</button>
                     <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); setMapSaveMessage(''); }} style={{fontSize:14,fontWeight:700,padding:'9px 16px'}}>Cancel</button>
-                    {mapSaveMessage && <span style={{alignSelf:'center',fontSize:14,fontWeight:800,color:'#2563eb'}}>{mapSaveMessage}</span>}
                   </div>
+                  {mapSaveMessage && <div style={{marginTop:8,fontSize:14,fontWeight:800,color:'#2563eb'}}>Mapping was successful.</div>}
                 </div>
               )
             })()}
@@ -4186,7 +4197,7 @@ export default function App(){
                       onClick={async ()=>{
                         try{
                           const des = mapRight.find(r=>r.id===mapDesignated)
-                          const desFamilyId = Number(des?.MEMBER_ID||des?.member_id||0)
+                          const desFamilyId = Number(des?.MEMBER_ID||des?.member_id||des?.id||0)
                           if(!desFamilyId){ setStatus('Designated member has no MEMBER_ID'); return; }
                           let ok=0
                           for(const m of mapRight){
@@ -4195,13 +4206,13 @@ export default function App(){
                             if(res.ok) ok++
                           }
                           setStatus(`Map Families saved: ${ok}/${mapRight.length} updated with FAMILY_ID=${desFamilyId}`)
-                          setMapSaveMessage('Mapping was saved successfully.')
+                          setMapSaveMessage('Mapping was successful.')
                           await fetchMembers('')
                         }catch(e){ setStatus('Map Families save failed: '+e.message) }
                       }}>Save Family Mapping</button>
                     <button onClick={()=>{ setMapMode(null); setMapTargetMember(null); setMapRight([]); setMapDesignated(null); setMapSaveMessage(''); }} style={{fontSize:14,fontWeight:700,padding:'9px 16px'}}>Cancel</button>
-                    {mapSaveMessage && <span style={{alignSelf:'center',fontSize:14,fontWeight:800,color:'#16a34a'}}>{mapSaveMessage}</span>}
                   </div>
+                  {mapSaveMessage && <div style={{marginTop:8,fontSize:14,fontWeight:800,color:'#16a34a'}}>Mapping was successful.</div>}
                 </div>
               )
             })()}
