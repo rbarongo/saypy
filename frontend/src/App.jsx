@@ -1498,6 +1498,7 @@ export default function App(){
   const [periodSummaryLoading, setPeriodSummaryLoading] = useState(false)
   const [periodSummaryFrom, setPeriodSummaryFrom] = useState('')
   const [periodSummaryTo, setPeriodSummaryTo] = useState('')
+  const [reportShowOnlyDataColumns, setReportShowOnlyDataColumns] = useState(true)
   const [reportMaxRows, setReportMaxRows] = useState(30)
   const [reportCollectionsMaxRows, setReportCollectionsMaxRows] = useState(30)
   const [dashboardStats, setDashboardStats] = useState({ members: null, users: null, loading: false })
@@ -1555,6 +1556,40 @@ export default function App(){
   function safeNumber(v){
     const n = Number(v)
     return Number.isFinite(n) ? n : 0
+  }
+
+  function hasReportCellData(v){
+    if(v === null || v === undefined) return false
+    if(typeof v === 'string') return v.trim() !== ''
+    if(typeof v === 'number') return Number.isFinite(v)
+    if(typeof v === 'boolean') return true
+    if(v instanceof Date) return !Number.isNaN(v.getTime())
+    return String(v).trim() !== ''
+  }
+
+  function getReportVisibleColumns(rows){
+    const arr = Array.isArray(rows) ? rows : []
+    if(!arr.length) return []
+    const first = arr[0] || {}
+    const ordered = Object.keys(first)
+    const visible = ordered.filter((col)=> arr.some((row)=> hasReportCellData(row?.[col])))
+    return visible.length ? visible : ordered
+  }
+
+  function getReportAllColumns(rows){
+    const arr = Array.isArray(rows) ? rows : []
+    if(!arr.length) return []
+    const ordered = []
+    const seen = new Set()
+    arr.forEach((row)=>{
+      Object.keys(row || {}).forEach((col)=>{
+        if(!seen.has(col)){
+          seen.add(col)
+          ordered.push(col)
+        }
+      })
+    })
+    return ordered
   }
 
   function normalizeDateText(v){
@@ -1920,6 +1955,11 @@ export default function App(){
     })
     setAggRows(Object.values(map));
   }
+
+  const reportAllColumns = getReportAllColumns(reportRows)
+  const reportVisibleColumns = reportShowOnlyDataColumns
+    ? getReportVisibleColumns(reportRows)
+    : reportAllColumns
 
   // ----- Simple helpers for role checks -----
   function isAdmin(){
@@ -3602,6 +3642,14 @@ export default function App(){
                 <select value={reportMaxRows} onChange={e=>setReportMaxRows(Number(e.target.value))}>
                   {[10,30,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
                 </select>
+                <label style={{display:'flex', alignItems:'center', gap:6, marginLeft:8, color:'#334155'}}>
+                  <input
+                    type='checkbox'
+                    checked={reportShowOnlyDataColumns}
+                    onChange={e=>setReportShowOnlyDataColumns(e.target.checked)}
+                  />
+                  Only columns with data
+                </label>
                 <span style={{color:'#666'}}>Showing {Math.min(reportRows.length, reportMaxRows)} of {reportRows.length}</span>
               </div>
 
@@ -3638,14 +3686,14 @@ export default function App(){
                 <table style={mainGridTableStyle(true)}>
                   <thead>
                     <tr>
-                      {reportRows[0] ? Object.keys(reportRows[0]).map(k=> <th key={k}>{labelForColumn(k)}</th>) : <th>No rows</th>}
+                      {reportRows[0] ? reportVisibleColumns.map(k=> <th key={k}>{labelForColumn(k)}</th>) : <th>No rows</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {(() => {
                       try{
                         return (Array.isArray(reportRows)? reportRows : []).slice(0, reportMaxRows).map((r,idx)=> (
-                          <tr key={idx}>{Object.keys(r||{}).map(k=> <td key={k} style={{padding:6}}>{String((r&&r[k])||'')}</td>)}</tr>
+                          <tr key={idx}>{reportVisibleColumns.map(k=> <td key={k} style={{padding:6}}>{String((r&&r[k])||'')}</td>)}</tr>
                         ))
                       }catch(e){
                         console.error('Render error in reports table', e)
