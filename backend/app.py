@@ -579,7 +579,10 @@ async def upload(batch: UploadFile = File(...), auth: dict = Depends(require_api
     if s1_col is not None:
         try:
             mask = out_df[s1_col].notna() & (out_df[s1_col].astype(str).str.strip() != '')
-            out_df = out_df[mask]
+            # Only apply this filter when the guessed serial column actually has values.
+            # Excel uploads often omit s1 and relying on this filter would drop every row.
+            if bool(mask.any()):
+                out_df = out_df[mask]
         except Exception:
             # if anything goes wrong with filtering, fall back to original df
             pass
@@ -602,7 +605,8 @@ async def upload_headers(batch: UploadFile = File(...), auth: dict = Depends(req
     if s1_col is not None:
         try:
             mask = df[s1_col].notna() & (df[s1_col].astype(str).str.strip() != '')
-            df_filtered = df[mask]
+            if bool(mask.any()):
+                df_filtered = df[mask]
         except Exception:
             df_filtered = df
 
