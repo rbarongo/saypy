@@ -2445,7 +2445,8 @@ export default function App(){
       }))
         .filter((row)=>{
           const key = String(row?.item || '').trim().toLowerCase()
-          return key !== 'na' && key !== 'n/a' && key !== 'total'
+          const normalized = key.replace(/[^a-z0-9]+/g, '')
+          return normalized !== 'na' && normalized !== 'total'
         })
         .sort((a, b)=>{
         const diff = safeNumber(b.total) - safeNumber(a.total)
