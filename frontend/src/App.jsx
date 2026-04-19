@@ -7,8 +7,8 @@ const LOCAL_API_BASE = 'http://localhost:8000'
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
 
 function rewriteApiUrl(input){
-  // Default to HTTP for API calls; backend commonly runs on plain HTTP:8000.
-  const base = API_BASE || (typeof window !== 'undefined' ? `http://${window.location.hostname}:8000` : LOCAL_API_BASE)
+  // Prefer explicit env base; otherwise inherit current page protocol to avoid mixed-content fetch failures.
+  const base = API_BASE || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000` : LOCAL_API_BASE)
   if(typeof input === 'string' && input.startsWith(LOCAL_API_BASE)){
     return `${base}${input.slice(LOCAL_API_BASE.length)}`
   }
@@ -1576,7 +1576,12 @@ export default function App(){
       setPeriodSummaryRows(Array.isArray(data.rows) ? data.rows : [])
       setPeriodSummaryTotals(data.totals || {local: 0, conference: 0, total: 0})
     }catch(e){
-      setStatus('Period summary failed: ' + (e?.message || String(e)))
+      const msg = String(e?.message || e || '')
+      if(msg.toLowerCase().includes('failed to fetch')){
+        setStatus('Period summary failed: network error (Failed to fetch). Check backend is running and API base URL/protocol is correct.')
+      }else{
+        setStatus('Period summary failed: ' + msg)
+      }
     }finally{
       setPeriodSummaryLoading(false)
     }
