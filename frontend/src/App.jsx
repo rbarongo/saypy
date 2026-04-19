@@ -3755,14 +3755,39 @@ export default function App(){
                         ''
                       ).trim()
                       const seenIdentity = new Set()
+                      const seenIdentityLabel = new Set()
                       const identityOptions = []
 
+                      const pushIdentityOption = (identityRaw, nameRaw)=>{
+                        const identity = Number(identityRaw)
+                        if(!Number.isFinite(identity) || identity <= 0) return
+                        const nm = String(nameRaw || '').trim() || 'Unknown Member'
+                        const label = `${nm} (ID:${identity})`
+                        const dedupeKey = `${identity}|${label}`
+                        if(seenIdentityLabel.has(dedupeKey)) return
+                        seenIdentityLabel.add(dedupeKey)
+                        seenIdentity.add(identity)
+                        identityOptions.push({ value: identity, label })
+                      }
+
+                      const pushCanonicalForIdentity = (identityRaw, fallbackNameRaw)=>{
+                        const identity = Number(identityRaw)
+                        if(!Number.isFinite(identity) || identity <= 0) return
+                        const canonical = (members || []).find(mm => Number(mm?.MEMBER_ID ?? mm?.member_id) === identity)
+                          || (members || []).find(mm => Number(mm?.OFFICIAL_MEMBER_ID ?? mm?.official_member_id) === identity)
+                        const canonicalName = String(canonical?.MEMBER_NAME || canonical?.member_name || fallbackNameRaw || '').trim() || 'Unknown Member'
+                        pushIdentityOption(identity, canonicalName)
+                      }
+
                       if(Number.isFinite(selectedMemberRealId) && selectedMemberRealId > 0){
-                        seenIdentity.add(selectedMemberRealId)
-                        identityOptions.push({
-                          value: selectedMemberRealId,
-                          label: `${selectedMemberName || 'Selected Member'} (ID:${selectedMemberRealId})`,
-                        })
+                        // 1) Always include the clicked record itself.
+                        pushIdentityOption(selectedMemberRealId, selectedMemberName || 'Selected Member')
+                        // 2) Also include the canonical row mapped by clicked MEMBER_ID.
+                        const canonicalForClicked = (members || []).find(mm => Number(mm?.MEMBER_ID ?? mm?.member_id) === selectedMemberRealId)
+                        if(canonicalForClicked && Number(canonicalForClicked?.id) !== Number(clickedMemberRow?.id)){
+                          const canonicalClickedName = String(canonicalForClicked?.MEMBER_NAME || canonicalForClicked?.member_name || '').trim()
+                          pushIdentityOption(selectedMemberRealId, canonicalClickedName || 'Canonical Member')
+                        }
                       }
 
                       const sourceMembers = (filteredMembers && filteredMembers.length ? filteredMembers : (members || []))
@@ -3770,14 +3795,15 @@ export default function App(){
                         const uniqueRaw = m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id
                         const uniqueVal = Number(uniqueRaw)
                         if(!Number.isFinite(uniqueVal) || uniqueVal <= 0) return
-                        if(seenIdentity.has(uniqueVal)) return
-                        seenIdentity.add(uniqueVal)
-                        const canonical = (members || []).find(mm => Number(mm?.MEMBER_ID ?? mm?.member_id) === uniqueVal)
-                          || (members || []).find(mm => Number(mm?.OFFICIAL_MEMBER_ID ?? mm?.official_member_id) === uniqueVal)
-                        const canonicalName = String(canonical?.MEMBER_NAME || canonical?.member_name || m?.MEMBER_NAME || m?.member_name || '').trim() || 'Unknown Member'
-                        const canonicalId = canonical?.MEMBER_ID ?? canonical?.member_id
-                        const displayId = (canonicalId !== null && canonicalId !== undefined && String(canonicalId).trim() !== '') ? canonicalId : uniqueVal
-                        identityOptions.push({ value: uniqueVal, label: `${canonicalName} (ID:${displayId})` })
+                        pushCanonicalForIdentity(uniqueVal, m?.MEMBER_NAME || m?.member_name)
+                      })
+
+                      // Also include rows that have MEMBER_ID values from current search/result scope.
+                      ;(sourceMembers || []).forEach(m=>{
+                        const memberRaw = m?.MEMBER_ID ?? m?.member_id
+                        const memberVal = Number(memberRaw)
+                        if(!Number.isFinite(memberVal) || memberVal <= 0) return
+                        pushCanonicalForIdentity(memberVal, m?.MEMBER_NAME || m?.member_name)
                       })
 
                       if(Number.isFinite(selectedMemberIdentity) && selectedMemberIdentity > 0 && !seenIdentity.has(selectedMemberIdentity)){
