@@ -1488,10 +1488,12 @@ export default function App(){
   const [reportRows, setReportRows] = useState([])
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
+  const [selectedContributorName, setSelectedContributorName] = useState('')
   const [aggRows, setAggRows] = useState([])
   const [selectedReportBuilder, setSelectedReportBuilder] = useState('meeting_summary')
   const [builtReportRows, setBuiltReportRows] = useState([])
   const [builtReportColumns, setBuiltReportColumns] = useState([])
+  const [itemTotalsByDateRows, setItemTotalsByDateRows] = useState([])
   const [meetingSummaryRows, setMeetingSummaryRows] = useState([])
   const [meetingSummaryTotals, setMeetingSummaryTotals] = useState({local: 0, conference: 0, total: 0})
   const [periodSummaryRows, setPeriodSummaryRows] = useState([])
@@ -1975,6 +1977,93 @@ export default function App(){
     ]
   }
 
+  function buildDateGroupedCollectionTotals(entries){
+    const grouped = {}
+    ;(Array.isArray(entries) ? entries : []).forEach((entry)=>{
+      const dayKey = String(entry?.date || 'Unknown date')
+      if(!grouped[dayKey]){
+        grouped[dayKey] = {
+          date: dayKey,
+          entries: 0,
+          local: 0,
+          conference: 0,
+          total: 0,
+          itemSet: new Set(),
+        }
+      }
+      grouped[dayKey].itemSet.add(String(entry?.item_name || '').trim().toLowerCase())
+      grouped[dayKey].local += safeNumber(entry?.category === 'local' ? entry?.amount : 0)
+      grouped[dayKey].conference += safeNumber(entry?.category === 'conference' ? entry?.amount : 0)
+      grouped[dayKey].total += safeNumber(entry?.amount)
+    })
+
+    const rows = Object.keys(grouped)
+      .sort((a, b)=>{
+        if(a === 'Unknown date' && b !== 'Unknown date') return 1
+        if(b === 'Unknown date' && a !== 'Unknown date') return -1
+        return String(a).localeCompare(String(b))
+      })
+      .map((k)=>({
+        date: grouped[k].date,
+        entries: grouped[k].itemSet.size,
+        local: grouped[k].local,
+        conference: grouped[k].conference,
+        total: grouped[k].total,
+      }))
+
+    return rows.filter((r)=> safeNumber(r.total) !== 0)
+  }
+
+  function buildContributorDateItemMatrix(entries, contributorName){
+    const target = String(contributorName || '').trim().toLowerCase()
+    if(!target) return { columns: [], rows: [], itemColumns: [] }
+
+    const filtered = (Array.isArray(entries) ? entries : []).filter((entry)=>{
+      return String(entry?.contributor || '').trim().toLowerCase() === target
+    })
+    if(!filtered.length) return { columns: [], rows: [], itemColumns: [] }
+
+    const itemSet = new Set()
+    const byDate = {}
+    filtered.forEach((entry)=>{
+      const date = String(entry?.date || 'Unknown date')
+      const item = String(entry?.item_name || 'Unknown item')
+      itemSet.add(item)
+      if(!byDate[date]) byDate[date] = { date }
+      byDate[date][item] = safeNumber(byDate[date][item]) + safeNumber(entry?.amount)
+    })
+
+    const itemColumns = Array.from(itemSet.values()).sort((a, b)=> String(a).localeCompare(String(b)))
+    const rows = Object.keys(byDate)
+      .sort((a, b)=>{
+        if(a === 'Unknown date' && b !== 'Unknown date') return 1
+        if(b === 'Unknown date' && a !== 'Unknown date') return -1
+        return String(a).localeCompare(String(b))
+      })
+      .map((date)=>{
+        const out = { date }
+        let rowTotal = 0
+        itemColumns.forEach((item)=>{
+          const amount = safeNumber(byDate[date][item])
+          out[item] = amount
+          rowTotal += amount
+        })
+        out.row_total = rowTotal
+        return out
+      })
+
+    const totalsRow = { date: 'TOTAL' }
+    let grandTotal = 0
+    itemColumns.forEach((item)=>{
+      const colTotal = rows.reduce((sum, r)=> sum + safeNumber(r[item]), 0)
+      totalsRow[item] = colTotal
+      grandTotal += colTotal
+    })
+    totalsRow.row_total = grandTotal
+
+    return { columns: ['date', ...itemColumns, 'row_total'], rows: [...rows, totalsRow], itemColumns }
+  }
+
   async function fetchPeriodSummary(){
     setPeriodSummaryLoading(true)
     setPeriodSummaryRows([])
@@ -2173,6 +2262,7 @@ export default function App(){
         const outWithTotal = appendGroupedTotalsRow(rows, 'date')
         setBuiltReportColumns(['date', 'conference', 'local', 'total'])
         setBuiltReportRows(outWithTotal)
+        setItemTotalsByDateRows([])
         setMeetingSummaryRows([])
         setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
         setStatus('Daily totals report built successfully.')
@@ -2188,6 +2278,7 @@ export default function App(){
     if(!entries.length){
       setBuiltReportRows([])
       setBuiltReportColumns([])
+      setItemTotalsByDateRows([])
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus('No report data found for the selected filters.')
@@ -2215,6 +2306,7 @@ export default function App(){
         ))
       setBuiltReportColumns(['date', 'receipt_no', 'contributor', 'item_name', 'category', 'amount', 'entry_method'])
       setBuiltReportRows(out)
+      setItemTotalsByDateRows([])
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus(`Detailed entries report built successfully (${out.length} rows).`)
@@ -2235,8 +2327,10 @@ export default function App(){
         return String(a.item || '').localeCompare(String(b.item || ''))
       })
       const outWithTotal = appendGroupedTotalsRow(out, 'item')
+      const byDateWithTotal = appendGroupedTotalsRow(buildDateGroupedCollectionTotals(entries), 'date')
       setBuiltReportColumns(['item', 'entries', 'local', 'conference', 'total'])
       setBuiltReportRows(outWithTotal)
+      setItemTotalsByDateRows(byDateWithTotal)
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus('Collection item totals report built successfully.')
@@ -2244,29 +2338,32 @@ export default function App(){
     }
 
     if(selectedReportBuilder === 'contributor_totals'){
-      const grouped = {}
-      entries.forEach((entry)=>{
-        const rawContributor = String(entry?.contributor || '').trim()
-        const label = rawContributor || 'Unknown contributor'
-        const key = label.toLowerCase()
-        if(!grouped[key]){
-          grouped[key] = { contributor: label, local: 0, conference: 0, total: 0, entries: 0 }
-        }
-        grouped[key][entry.category] += safeNumber(entry.amount)
-        grouped[key].total += safeNumber(entry.amount)
-        grouped[key].entries += 1
-      })
-      const out = Object.values(grouped).sort((a, b)=>{
-        const diff = safeNumber(b.total) - safeNumber(a.total)
-        if(diff !== 0) return diff
-        return String(a.contributor || '').localeCompare(String(b.contributor || ''))
-      })
-      const outWithTotal = appendGroupedTotalsRow(out, 'contributor')
-      setBuiltReportColumns(['contributor', 'entries', 'local', 'conference', 'total'])
-      setBuiltReportRows(outWithTotal)
+      const contributor = String(selectedContributorName || '').trim()
+      if(!contributor){
+        setBuiltReportColumns([])
+        setBuiltReportRows([])
+        setItemTotalsByDateRows([])
+        setMeetingSummaryRows([])
+        setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+        setStatus('Select contributor name first for Contributor Totals report.')
+        return
+      }
+      const matrix = buildContributorDateItemMatrix(entries, contributor)
+      if(!matrix.rows.length){
+        setBuiltReportColumns([])
+        setBuiltReportRows([])
+        setItemTotalsByDateRows([])
+        setMeetingSummaryRows([])
+        setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
+        setStatus(`No contributions found for contributor: ${contributor}`)
+        return
+      }
+      setBuiltReportColumns(matrix.columns)
+      setBuiltReportRows(matrix.rows)
+      setItemTotalsByDateRows([])
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
-      setStatus('Contributor totals report built successfully.')
+      setStatus(`Contributor totals report built successfully for ${contributor}.`)
       return
     }
 
@@ -2287,6 +2384,7 @@ export default function App(){
     setMeetingSummaryTotals(totals)
     setBuiltReportColumns([])
     setBuiltReportRows([])
+    setItemTotalsByDateRows([])
     setStatus('Meeting summary form built successfully.')
   }
 
@@ -2509,7 +2607,15 @@ export default function App(){
     if(isDailyTotals && key === 'conference') return 'Conference Amount'
     if(isDailyTotals && key === 'local') return `${currentChurchName()} Amount`
     if(isDailyTotals && key === 'total') return 'Total Amount'
+    if(selectedReportBuilder === 'contributor_totals' && key === 'date') return 'Date'
+    if(selectedReportBuilder === 'contributor_totals' && key === 'row_total') return 'Total'
     return labelForColumn(col)
+  }
+
+  function isBuiltReportNumericColumn(col){
+    if(['amount','local','conference','total'].includes(String(col))) return true
+    if(selectedReportBuilder === 'contributor_totals' && String(col) !== 'date') return true
+    return false
   }
 
   function exportBuiltReportExcel(){
@@ -2527,6 +2633,20 @@ export default function App(){
       dataset.rows.forEach(row=>{
         rows.push(dataset.columns.map(col=> row?.[col] ?? ''))
       })
+      if(selectedReportBuilder === 'item_totals' && Array.isArray(itemTotalsByDateRows) && itemTotalsByDateRows.length){
+        rows.push([])
+        rows.push(['Collection Item Totals By Date'])
+        rows.push(['Date', 'Items With Values', 'Local', 'Conference', 'Total'])
+        itemTotalsByDateRows.forEach((row)=>{
+          rows.push([
+            String(row?.date || ''),
+            Number(row?.entries || 0),
+            Number(row?.local || 0),
+            Number(row?.conference || 0),
+            Number(row?.total || 0),
+          ])
+        })
+      }
       const stamp = `${(reportFrom || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}_${(reportTo || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}`
       downloadCsv(`report_builder_${stamp}.csv`, rows)
       setStatus('Built report exported to CSV.')
@@ -2548,7 +2668,7 @@ export default function App(){
       const head = [dataset.columns.map(c=>labelForBuiltReportColumn(c, dataset.title))]
       const body = dataset.rows.map(row=> dataset.columns.map(col=>{
         const v = row?.[col]
-        return ['amount','local','conference','total'].includes(String(col)) ? formatNumber(v) : String(v ?? '')
+        return isBuiltReportNumericColumn(col) ? formatNumber(v) : String(v ?? '')
       }))
       autoTable(doc, {
         startY: 78,
@@ -2558,6 +2678,25 @@ export default function App(){
         headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold' },
         styles: { fontSize: 9, textColor: [15, 23, 42] },
       })
+      if(selectedReportBuilder === 'item_totals' && Array.isArray(itemTotalsByDateRows) && itemTotalsByDateRows.length){
+        const nextY = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : 78) + 18
+        doc.setFontSize(11)
+        doc.text('Collection Item Totals By Date', 36, nextY)
+        autoTable(doc, {
+          startY: nextY + 8,
+          head: [['Date', 'Items With Values', 'Local', 'Conference', 'Total']],
+          body: itemTotalsByDateRows.map((row)=> ([
+            String(row?.date || ''),
+            String(Number(row?.entries || 0)),
+            formatNumber(row?.local || 0),
+            formatNumber(row?.conference || 0),
+            formatNumber(row?.total || 0),
+          ])),
+          theme: 'grid',
+          headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold' },
+          styles: { fontSize: 9, textColor: [15, 23, 42] },
+        })
+      }
       const stamp = `${(reportFrom || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}_${(reportTo || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}`
       doc.save(`report_builder_${stamp}.pdf`)
       setStatus('Built report exported to PDF.')
@@ -4059,6 +4198,23 @@ export default function App(){
                   <button type='button' onClick={exportBuiltReportExcel}>Export Built CSV</button>
                   <span style={{fontSize:12, color:'#64748b'}}>Selected: {reportBuilderOptions.find(r=> r.id===selectedReportBuilder)?.title}</span>
                 </div>
+                {selectedReportBuilder === 'contributor_totals' && (
+                  <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginTop:8}}>
+                    <label style={{fontSize:12, color:'#334155', fontWeight:700}}>Contributor Name</label>
+                    <input
+                      list='contributor-names-list'
+                      value={selectedContributorName}
+                      onChange={e=>setSelectedContributorName(e.target.value)}
+                      placeholder='Select or type contributor name'
+                      style={{minWidth:260}}
+                    />
+                    <datalist id='contributor-names-list'>
+                      {Array.from(new Set((Array.isArray(reportRows) ? reportRows : []).map((r)=> String(r?.s4 || '').trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b)).map((name)=> (
+                        <option key={name} value={name} />
+                      ))}
+                    </datalist>
+                  </div>
+                )}
               </div>
 
               {showReportColumnPicker && (
@@ -4199,10 +4355,15 @@ export default function App(){
                       </thead>
                       <tbody>
                         {builtReportRows.slice(0, reportMaxRows).map((row, idx)=> (
-                          <tr key={idx}>
+                          <tr
+                            key={idx}
+                            style={selectedReportBuilder === 'contributor_totals' && String(row?.date || '').toUpperCase() === 'TOTAL'
+                              ? {fontWeight:800, background:'#f8fafc'}
+                              : undefined}
+                          >
                             {builtReportColumns.map(col=> (
                               <td key={col} style={{padding:6}}>
-                                {['local', 'conference', 'total', 'amount'].includes(col) ? formatNumber(row[col]) : String(row[col] ?? '')}
+                                {isBuiltReportNumericColumn(col) ? formatNumber(row[col]) : String(row[col] ?? '')}
                               </td>
                             ))}
                           </tr>
@@ -4210,6 +4371,35 @@ export default function App(){
                       </tbody>
                     </table>
                   </div>
+                  {selectedReportBuilder === 'item_totals' && itemTotalsByDateRows.length > 0 && (
+                    <div style={{marginTop:10}}>
+                      <h5 style={{margin:'6px 0', color:'#0f172a'}}>Collection Item Totals By Date</h5>
+                      <div style={mainGridWrapStyle(260)}>
+                        <table style={mainGridTableStyle(true)}>
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Items With Values</th>
+                              <th>Local</th>
+                              <th>Conference</th>
+                              <th>Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {itemTotalsByDateRows.map((row, idx)=> (
+                              <tr key={idx}>
+                                <td style={{padding:6}}>{String(row?.date || '')}</td>
+                                <td style={{padding:6, textAlign:'right'}}>{Number(row?.entries || 0)}</td>
+                                <td style={{padding:6, textAlign:'right'}}>{formatNumber(row?.local || 0)}</td>
+                                <td style={{padding:6, textAlign:'right'}}>{formatNumber(row?.conference || 0)}</td>
+                                <td style={{padding:6, textAlign:'right'}}>{formatNumber(row?.total || 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
