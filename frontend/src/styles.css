@@ -52,7 +52,10 @@ input[type="date"]{
 input[type="date"]::-webkit-calendar-picker-indicator{
   opacity: 1;
   cursor: pointer;
-  filter: invert(0) brightness(0.35);
+  filter: invert(1) brightness(1.2) contrast(1.1);
+  background: rgba(255,255,255,0.18);
+  border-radius: 6px;
+  padding: 2px;
 }
 
 input[type="date"]::-webkit-datetime-edit,
