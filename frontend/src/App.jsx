@@ -1878,6 +1878,14 @@ export default function App(){
     const arr = Array.isArray(rows) ? rows : []
     if(!arr.length || !defs.length) return []
 
+    const defByKey = new Map()
+    defs.forEach((def)=>{
+      const byColumn = String(def?.column_name || '').trim().toLowerCase()
+      const byCode = String(def?.code || '').trim().toLowerCase()
+      if(byColumn) defByKey.set(byColumn, def)
+      if(byCode) defByKey.set(byCode, def)
+    })
+
     const grouped = {}
     arr.forEach((row)=>{
       const dayKey = normalizeDateText(row?.s2) || 'Unknown date'
@@ -1902,6 +1910,38 @@ export default function App(){
         }
         grouped[dayKey].total += amount
       })
+
+      // Fallback for rows whose usable amount is stored in generic fields (for example s5)
+      // instead of the configured collection amount column.
+      if(!rowHasAmount){
+        const fallbackAmount = safeNumber(inferRowAmount(row))
+        if(fallbackAmount !== 0){
+          const rowCode = String(row?.collection_code || '').trim().toLowerCase()
+          const matchedDef = defByKey.get(rowCode)
+          if(matchedDef){
+            const cfg = normalizeScopeConfig(matchedDef?.scope, matchedDef?.conference_split_pct)
+            if(cfg.mode === 'conference'){
+              grouped[dayKey].conference += fallbackAmount
+            }else if(cfg.mode === 'split'){
+              const conferenceShare = fallbackAmount * (cfg.splitPct / 100)
+              grouped[dayKey].conference += conferenceShare
+              grouped[dayKey].local += fallbackAmount - conferenceShare
+            }else{
+              grouped[dayKey].local += fallbackAmount
+            }
+          }else{
+            // If there is no scoped definition for this row code, infer category
+            // from the collection label so conference-like offerings are not
+            // misclassified into local totals.
+            const itemLabel = labelForCollectionCode(row?.collection_code)
+            const inferredCategory = categorizeContribution(itemLabel)
+            if(inferredCategory === 'conference') grouped[dayKey].conference += fallbackAmount
+            else grouped[dayKey].local += fallbackAmount
+          }
+          grouped[dayKey].total += fallbackAmount
+          rowHasAmount = true
+        }
+      }
 
       if(rowHasAmount) grouped[dayKey].entries += 1
     })
