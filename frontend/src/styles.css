@@ -64,6 +64,22 @@ input[type="date"]::-webkit-datetime-edit-year-field{
   color: inherit;
 }
 
+/* Improve readability for Period Summary datepickers on the white report panel */
+.period-summary-date{
+  background:#0f172a;
+  color:#f8fafc;
+  border:1px solid #334155;
+}
+
+.period-summary-date::-webkit-datetime-edit,
+.period-summary-date::-webkit-datetime-edit-fields-wrapper,
+.period-summary-date::-webkit-datetime-edit-text,
+.period-summary-date::-webkit-datetime-edit-month-field,
+.period-summary-date::-webkit-datetime-edit-day-field,
+.period-summary-date::-webkit-datetime-edit-year-field{
+  color:#f8fafc;
+}
+
 button.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#052426;border:none;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:700}
 button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:6px 10px;border-radius:8px}
 

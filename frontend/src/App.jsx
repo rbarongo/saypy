@@ -3467,9 +3467,9 @@ export default function App(){
               </div>
               <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:10}}>
                 <label style={{fontWeight:700, color:'#0f172a'}}>From:</label>
-                <input type='date' value={periodSummaryFrom} onChange={e=>setPeriodSummaryFrom(e.target.value)} />
+                <input className='period-summary-date' type='date' value={periodSummaryFrom} onChange={e=>setPeriodSummaryFrom(e.target.value)} />
                 <label style={{fontWeight:700, color:'#0f172a'}}>To:</label>
-                <input type='date' value={periodSummaryTo} onChange={e=>setPeriodSummaryTo(e.target.value)} />
+                <input className='period-summary-date' type='date' value={periodSummaryTo} onChange={e=>setPeriodSummaryTo(e.target.value)} />
                 <button type='button' onClick={fetchPeriodSummary} disabled={periodSummaryLoading}>{periodSummaryLoading ? 'Loading...' : 'Generate Summary'}</button>
                 <button type='button' onClick={exportPeriodSummaryPdf} disabled={periodSummaryLoading || periodSummaryRows.length === 0}>Export PDF</button>
                 <button type='button' onClick={exportPeriodSummaryExcel} disabled={periodSummaryLoading || periodSummaryRows.length === 0}>Export CSV</button>
