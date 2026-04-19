@@ -215,10 +215,11 @@ def _extract_members_collection_parts_from_s1(s1_value) -> Tuple[Optional[dateti
     return dt, church_id, s3num
 
 
-def _load_existing_serial_counters(keys: List[Tuple[str, int]]) -> Dict[Tuple[str, int], int]:
+def _load_existing_serial_state(keys: List[Tuple[str, int]]) -> Tuple[Dict[Tuple[str, int], int], Dict[Tuple[str, int], set]]:
     counters: Dict[Tuple[str, int], int] = {}
+    used: Dict[Tuple[str, int], set] = {}
     if not keys:
-        return counters
+        return counters, used
     try:
         with engine.connect() as conn:
             res = conn.execute(text('SELECT s2, church, s3 FROM members_collection WHERE s2 IS NOT NULL AND church IS NOT NULL'))
@@ -233,11 +234,12 @@ def _load_existing_serial_counters(keys: List[Tuple[str, int]]) -> Dict[Tuple[st
                     if k not in keys:
                         continue
                     counters[k] = max(counters.get(k, 0), int(s3v))
+                    used.setdefault(k, set()).add(int(s3v))
                 except Exception:
                     continue
     except Exception:
-        return counters
-    return counters
+        return counters, used
+    return counters, used
 
 
 def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = True, recompute_s1: bool = True) -> List[dict]:
@@ -258,7 +260,7 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
         if dt is not None and ch is not None:
             keys.add((dt.strftime('%Y-%m-%d'), int(ch)))
 
-    counters = _load_existing_serial_counters(list(keys))
+    counters, used_serials = _load_existing_serial_state(list(keys))
     out = []
     for row in rows:
         r = dict(row)
@@ -283,14 +285,27 @@ def normalize_members_collection_rows(rows: List[dict], fill_missing_s3: bool = 
         s3num = _coerce_int(r.get('s3'))
         if s3num is None and s1s3 is not None:
             s3num = s1s3
-        if fill_missing_s3 and s3num is None and s2dt is not None and church_id is not None:
+
+        if fill_missing_s3 and s2dt is not None and church_id is not None:
             k = (s2dt.strftime('%Y-%m-%d'), int(church_id))
-            nxt = counters.get(k, 0) + 1
-            counters[k] = nxt
-            s3num = nxt
+            used_for_key = used_serials.setdefault(k, set())
+            max_for_key = counters.get(k, 0)
+
+            if s3num is None or int(s3num) in used_for_key or int(s3num) <= int(max_for_key):
+                s3num = int(max_for_key) + 1
+
+            counters[k] = max(int(max_for_key), int(s3num))
+            used_for_key.add(int(s3num))
 
         if s3num is not None:
             r['s3'] = int(s3num)
+
+        # New submissions are treated as locked after submit; they can be unlocked
+        # by authorized roles for post-submission edits.
+        if r.get('is_locked') is None:
+            r['is_locked'] = 1
+        if _coerce_int(r.get('is_locked')) == 1 and r.get('locked_at') is None:
+            r['locked_at'] = datetime.utcnow()
 
         if recompute_s1:
             s1 = compute_members_collection_s1(r.get('s2'), r.get('church'), r.get('s3'))
@@ -521,6 +536,8 @@ role_policies = Table(
     Column('can_manage_members', Integer, nullable=False, server_default='0'),
     Column('can_manage_collections', Integer, nullable=False, server_default='0'),
     Column('can_manage_members_collections', Integer, nullable=False, server_default='0'),
+    Column('can_delete_members_collections', Integer, nullable=False, server_default='0'),
+    Column('can_unlock_members_collections', Integer, nullable=False, server_default='0'),
     Column('can_view_reports', Integer, nullable=False, server_default='0'),
     Column('can_manage_settings', Integer, nullable=False, server_default='0'),
     Column('can_manage_roles', Integer, nullable=False, server_default='0'),
@@ -867,21 +884,16 @@ def ensure_collection_codes_schema():
 
 
 def seed_role_policies():
-    """Seed built-in role policies if table is empty."""
+    """Seed built-in role policies and add any missing defaults."""
     ensure_db_exists()
+    try:
+        ensure_role_policies_schema()
+    except Exception:
+        pass
     inspector = inspect(engine)
     if 'role_policies' not in inspector.get_table_names():
         return
     with engine.connect() as conn:
-        res = conn.execute(text('SELECT COUNT(*) FROM role_policies'))
-        try:
-            cnt = res.scalar()
-        except Exception:
-            row = res.fetchone()
-            cnt = row[0] if row else 0
-        if cnt and int(cnt) > 0:
-            return
-
         defaults = [
             {
                 'role': 'system_admin',
@@ -891,6 +903,8 @@ def seed_role_policies():
                 'can_manage_members': 1,
                 'can_manage_collections': 1,
                 'can_manage_members_collections': 1,
+                'can_delete_members_collections': 1,
+                'can_unlock_members_collections': 1,
                 'can_view_reports': 1,
                 'can_manage_settings': 1,
                 'can_manage_roles': 1,
@@ -905,6 +919,8 @@ def seed_role_policies():
                 'can_manage_members': 1,
                 'can_manage_collections': 1,
                 'can_manage_members_collections': 1,
+                'can_delete_members_collections': 1,
+                'can_unlock_members_collections': 1,
                 'can_view_reports': 1,
                 'can_manage_settings': 1,
                 'can_manage_roles': 0,
@@ -919,6 +935,24 @@ def seed_role_policies():
                 'can_manage_members': 0,
                 'can_manage_collections': 1,
                 'can_manage_members_collections': 1,
+                'can_delete_members_collections': 0,
+                'can_unlock_members_collections': 0,
+                'can_view_reports': 1,
+                'can_manage_settings': 0,
+                'can_manage_roles': 0,
+                'can_view_collection_codes': 1,
+                'system_protected': 1,
+            },
+            {
+                'role': 'head_treasurer',
+                'display_name': 'Head Treasurer',
+                'can_view_dashboard': 1,
+                'can_manage_users': 0,
+                'can_manage_members': 0,
+                'can_manage_collections': 1,
+                'can_manage_members_collections': 1,
+                'can_delete_members_collections': 1,
+                'can_unlock_members_collections': 1,
                 'can_view_reports': 1,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
@@ -933,6 +967,8 @@ def seed_role_policies():
                 'can_manage_members': 1,
                 'can_manage_collections': 1,
                 'can_manage_members_collections': 1,
+                'can_delete_members_collections': 0,
+                'can_unlock_members_collections': 0,
                 'can_view_reports': 1,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
@@ -947,6 +983,8 @@ def seed_role_policies():
                 'can_manage_members': 0,
                 'can_manage_collections': 1,
                 'can_manage_members_collections': 1,
+                'can_delete_members_collections': 0,
+                'can_unlock_members_collections': 0,
                 'can_view_reports': 0,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
@@ -961,14 +999,57 @@ def seed_role_policies():
                 'can_manage_members': 0,
                 'can_manage_collections': 0,
                 'can_manage_members_collections': 1,
+                'can_delete_members_collections': 0,
+                'can_unlock_members_collections': 0,
                 'can_view_reports': 1,
                 'can_manage_settings': 0,
                 'can_manage_roles': 0,
                 'can_view_collection_codes': 1,
                 'system_protected': 1,
             },
+            {
+                'role': 'pastor',
+                'display_name': 'Pastor',
+                'can_view_dashboard': 1,
+                'can_manage_users': 0,
+                'can_manage_members': 0,
+                'can_manage_collections': 0,
+                'can_manage_members_collections': 0,
+                'can_delete_members_collections': 0,
+                'can_unlock_members_collections': 0,
+                'can_view_reports': 1,
+                'can_manage_settings': 0,
+                'can_manage_roles': 0,
+                'can_view_collection_codes': 0,
+                'system_protected': 1,
+            },
+            {
+                'role': 'elder',
+                'display_name': 'Elder',
+                'can_view_dashboard': 1,
+                'can_manage_users': 0,
+                'can_manage_members': 0,
+                'can_manage_collections': 0,
+                'can_manage_members_collections': 0,
+                'can_delete_members_collections': 0,
+                'can_unlock_members_collections': 0,
+                'can_view_reports': 1,
+                'can_manage_settings': 0,
+                'can_manage_roles': 0,
+                'can_view_collection_codes': 0,
+                'system_protected': 1,
+            },
         ]
+        existing_roles = set()
+        try:
+            existing = conn.execute(text('SELECT LOWER(role) FROM role_policies')).fetchall()
+            existing_roles = {str(r[0] or '').strip().lower() for r in existing}
+        except Exception:
+            existing_roles = set()
+
         for item in defaults:
+            if item.get('role') in existing_roles:
+                continue
             try:
                 conn.execute(sql_insert(role_policies).values(**item))
             except Exception:
@@ -981,14 +1062,20 @@ def seed_role_policies():
 
 def list_role_policies() -> List[dict]:
     ensure_db_exists()
+    try:
+        ensure_role_policies_schema()
+    except Exception:
+        pass
     out = []
     with engine.connect() as conn:
         try:
             res = conn.execute(text('''
                 SELECT id, role, display_name,
                        can_view_dashboard, can_manage_users, can_manage_members,
-                       can_manage_collections, can_manage_members_collections, can_view_reports,
-                       can_manage_settings, can_manage_roles, can_view_collection_codes, system_protected
+                      can_manage_collections, can_manage_members_collections,
+                      can_delete_members_collections, can_unlock_members_collections,
+                      can_view_reports, can_manage_settings, can_manage_roles,
+                      can_view_collection_codes, system_protected
                 FROM role_policies
                 ORDER BY role
             '''))
@@ -1002,11 +1089,13 @@ def list_role_policies() -> List[dict]:
                     'can_manage_members': bool(r[5]),
                     'can_manage_collections': bool(r[6]),
                     'can_manage_members_collections': bool(r[7]),
-                    'can_view_reports': bool(r[8]),
-                    'can_manage_settings': bool(r[9]),
-                    'can_manage_roles': bool(r[10]),
-                    'can_view_collection_codes': bool(r[11]),
-                    'system_protected': bool(r[12]),
+                    'can_delete_members_collections': bool(r[8]),
+                    'can_unlock_members_collections': bool(r[9]),
+                    'can_view_reports': bool(r[10]),
+                    'can_manage_settings': bool(r[11]),
+                    'can_manage_roles': bool(r[12]),
+                    'can_view_collection_codes': bool(r[13]),
+                    'system_protected': bool(r[14]),
                 })
         except Exception:
             pass
@@ -1042,6 +1131,8 @@ def upsert_role_policy(role_name: str, display_name: Optional[str], rights: dict
         'can_manage_members': 1 if rights.get('can_manage_members') else 0,
         'can_manage_collections': 1 if rights.get('can_manage_collections') else 0,
         'can_manage_members_collections': 1 if rights.get('can_manage_members_collections') else 0,
+        'can_delete_members_collections': 1 if rights.get('can_delete_members_collections') else 0,
+        'can_unlock_members_collections': 1 if rights.get('can_unlock_members_collections') else 0,
         'can_view_collection_codes': 1 if rights.get('can_view_collection_codes') else 0,
         'can_view_reports': 1 if rights.get('can_view_reports') else 0,
         'can_manage_settings': 1 if rights.get('can_manage_settings') else 0,
@@ -1058,6 +1149,8 @@ def upsert_role_policy(role_name: str, display_name: Optional[str], rights: dict
                     can_manage_members=:can_manage_members,
                     can_manage_collections=:can_manage_collections,
                     can_manage_members_collections=:can_manage_members_collections,
+                    can_delete_members_collections=:can_delete_members_collections,
+                    can_unlock_members_collections=:can_unlock_members_collections,
                     can_view_collection_codes=:can_view_collection_codes,
                     can_view_reports=:can_view_reports,
                     can_manage_settings=:can_manage_settings,
@@ -1159,6 +1252,8 @@ def ensure_role_policies_schema():
     expected = {
         'can_manage_members_collections': 'INTEGER',
         'can_view_collection_codes': 'INTEGER',
+        'can_delete_members_collections': 'INTEGER',
+        'can_unlock_members_collections': 'INTEGER',
     }
     added_cols = []
     for col, typ in expected.items():
@@ -1193,6 +1288,30 @@ def ensure_role_policies_schema():
                 UPDATE role_policies
                 SET can_view_collection_codes = 1
                 WHERE LOWER(role) IN ('system_admin', 'admin', 'treasurer', 'data_steward', 'uploader', 'viewer')
+            '''))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+    if 'can_delete_members_collections' in added_cols:
+        with engine.connect() as conn:
+            conn.execute(text('''
+                UPDATE role_policies
+                SET can_delete_members_collections = 1
+                WHERE LOWER(role) IN ('system_admin', 'admin', 'head_treasurer')
+            '''))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+    if 'can_unlock_members_collections' in added_cols:
+        with engine.connect() as conn:
+            conn.execute(text('''
+                UPDATE role_policies
+                SET can_unlock_members_collections = 1
+                WHERE LOWER(role) IN ('system_admin', 'admin', 'head_treasurer')
             '''))
             try:
                 conn.commit()
@@ -1501,6 +1620,11 @@ def ensure_members_collection_schema():
     expected['source'] = 'TEXT'
     expected['notes'] = 'TEXT'
     expected['church'] = 'INTEGER'
+    expected['is_locked'] = 'INTEGER'
+    expected['locked_at'] = 'DATETIME'
+    expected['locked_by_user_id'] = 'INTEGER'
+    expected['unlocked_at'] = 'DATETIME'
+    expected['unlocked_by_user_id'] = 'INTEGER'
     missing = [k for k in expected.keys() if k not in existing]
 
     # Add each missing column

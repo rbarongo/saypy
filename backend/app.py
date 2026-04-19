@@ -44,6 +44,7 @@ import numpy as np
 import math
 import logging
 import io
+import json
 
 app = FastAPI(title="KSC Migration API")
 logger = logging.getLogger(__name__)
@@ -53,10 +54,13 @@ bearer_scheme = HTTPBearer(auto_error=False)
 ROLE_SYSTEM_ADMIN = 'system_admin'
 ROLE_ADMIN = 'admin'
 ROLE_TREASURER = 'treasurer'
+ROLE_HEAD_TREASURER = 'head_treasurer'
+ROLE_PASTOR = 'pastor'
+ROLE_ELDER = 'elder'
 ROLE_DATA_STEWARD = 'data_steward'
 ROLE_UPLOADER = 'uploader'
 ROLE_VIEWER = 'viewer'
-ALL_ROLES = {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER}
+ALL_ROLES = {ROLE_SYSTEM_ADMIN, ROLE_ADMIN, ROLE_TREASURER, ROLE_HEAD_TREASURER, ROLE_PASTOR, ROLE_ELDER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER}
 
 MEMBER_STATUS_ACTIVE = 'active'
 MEMBER_STATUS_INACTIVE_TRANSFER = 'inactive by transfer'
@@ -188,9 +192,12 @@ def _role_has_right(role: Optional[str], right_flag: str) -> bool:
     # Backward-compatible fallback if policies are unavailable.
     fallback = {
         'can_manage_members': {ROLE_ADMIN, ROLE_DATA_STEWARD},
-        'can_manage_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER},
-        'can_manage_members_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER},
-        'can_view_collection_codes': {ROLE_ADMIN, ROLE_TREASURER, ROLE_UPLOADER, ROLE_VIEWER},
+        'can_manage_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_HEAD_TREASURER, ROLE_UPLOADER},
+        'can_manage_members_collections': {ROLE_ADMIN, ROLE_TREASURER, ROLE_HEAD_TREASURER, ROLE_DATA_STEWARD, ROLE_UPLOADER, ROLE_VIEWER},
+        'can_view_collection_codes': {ROLE_ADMIN, ROLE_TREASURER, ROLE_HEAD_TREASURER, ROLE_UPLOADER, ROLE_VIEWER},
+        'can_view_reports': {ROLE_ADMIN, ROLE_TREASURER, ROLE_HEAD_TREASURER, ROLE_PASTOR, ROLE_ELDER, ROLE_DATA_STEWARD, ROLE_VIEWER},
+        'can_delete_members_collections': {ROLE_ADMIN, ROLE_HEAD_TREASURER},
+        'can_unlock_members_collections': {ROLE_ADMIN, ROLE_HEAD_TREASURER},
     }
     try:
         for rp in list_role_policies():
@@ -312,6 +319,94 @@ def _enforce_church_scope(target_church, actor_church: Optional[int], context: s
     if int(t) != int(actor_church):
         raise HTTPException(status_code=403, detail=f"Restricted information: your account cannot access {context} for another church")
     return int(actor_church)
+
+
+def _ensure_collection_workflow_tables():
+    """Create workflow/audit tables used for delete approvals and collection action logs."""
+    with engine.begin() as conn:
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS collection_action_logs (
+                id INTEGER PRIMARY KEY,
+                action VARCHAR(80) NOT NULL,
+                row_id INTEGER NULL,
+                church INTEGER NULL,
+                actor_user_id INTEGER NULL,
+                actor_username VARCHAR(200) NULL,
+                actor_role VARCHAR(80) NULL,
+                details TEXT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS members_collection_delete_requests (
+                id INTEGER PRIMARY KEY,
+                row_id INTEGER NOT NULL,
+                church INTEGER NULL,
+                requested_by_user_id INTEGER NULL,
+                requested_by_username VARCHAR(200) NULL,
+                requested_by_role VARCHAR(80) NULL,
+                reason TEXT NULL,
+                status VARCHAR(40) NOT NULL DEFAULT 'pending',
+                approved_by_user_id INTEGER NULL,
+                approved_by_username VARCHAR(200) NULL,
+                approved_by_role VARCHAR(80) NULL,
+                decision_note TEXT NULL,
+                row_snapshot TEXT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                decided_at DATETIME NULL
+            )
+        '''))
+
+
+def _safe_json_text(value) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=True, default=str)
+    except Exception:
+        return '{}'
+
+
+def _auth_actor_identity(auth: dict) -> dict:
+    role = _auth_role(auth)
+    user_obj = auth.get('user') if isinstance(auth, dict) and isinstance(auth.get('user'), dict) else None
+    up_obj = auth.get('uploader') if isinstance(auth, dict) and isinstance(auth.get('uploader'), dict) else None
+    if user_obj:
+        return {
+            'user_id': user_obj.get('id'),
+            'username': user_obj.get('username'),
+            'role': role,
+        }
+    if up_obj:
+        return {
+            'user_id': None,
+            'username': up_obj.get('name'),
+            'role': role,
+        }
+    return {'user_id': None, 'username': None, 'role': role}
+
+
+def _log_collection_action(action: str, row_id: Optional[int], church: Optional[int], auth: dict, details: Optional[dict] = None):
+    """Write auditable action entries for collection workflow operations."""
+    actor = _auth_actor_identity(auth)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text('''
+                    INSERT INTO collection_action_logs
+                    (action, row_id, church, actor_user_id, actor_username, actor_role, details)
+                    VALUES (:a, :rid, :ch, :uid, :un, :role, :d)
+                '''),
+                {
+                    'a': action,
+                    'rid': row_id,
+                    'ch': church,
+                    'uid': actor.get('user_id'),
+                    'un': actor.get('username'),
+                    'role': actor.get('role'),
+                    'd': _safe_json_text(details or {}),
+                }
+            )
+    except Exception:
+        logger.exception('Failed to write collection action log')
 
 app.add_middleware(
     CORSMiddleware,
@@ -624,13 +719,25 @@ def update_members_collection(row_id: int, payload: dict, auth: dict = Depends(r
             raise HTTPException(status_code=400, detail='No updatable columns provided')
 
         actor_church = _auth_context_church(auth)
+        actor_role = _auth_role(auth)
+        can_unlock = _role_has_right(actor_role, 'can_unlock_members_collections')
+        existing_row = None
         if actor_church is not None:
             with engine.connect() as conn:
-                existing = conn.execute(text('SELECT church FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
-            if not existing:
+                existing_row = conn.execute(text('SELECT church, is_locked FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if not existing_row:
                 raise HTTPException(status_code=404, detail='members_collection row not found')
-            _enforce_church_scope(existing[0], actor_church, context='this members_collection record')
+            _enforce_church_scope(existing_row[0], actor_church, context='this members_collection record')
+            if int(existing_row[1] or 0) == 1 and not can_unlock:
+                raise HTTPException(status_code=403, detail='This record is locked. Request unlock from head treasurer.')
             update_cols['church'] = _enforce_church_scope(update_cols.get('church'), actor_church, context='members_collection update')
+        else:
+            with engine.connect() as conn:
+                existing_row = conn.execute(text('SELECT church, is_locked FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if not existing_row:
+                raise HTTPException(status_code=404, detail='members_collection row not found')
+            if int(existing_row[1] or 0) == 1 and not can_unlock:
+                raise HTTPException(status_code=403, detail='This record is locked. Unlock is required before editing.')
 
         if any(k in update_cols for k in ('s2', 's3', 'church', 's1')):
             with engine.connect() as conn:
@@ -652,7 +759,236 @@ def update_members_collection(row_id: int, payload: dict, auth: dict = Depends(r
                 conn.commit()
             except Exception:
                 pass
+        _log_collection_action('members_collection_update', row_id, update_cols.get('church') or (existing_row[0] if existing_row else None), auth, {'updated_fields': sorted(list(update_cols.keys()))})
         return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/members_collection/{row_id}/unlock')
+def unlock_members_collection(row_id: int, auth: dict = Depends(require_api_key_or_user)):
+    """Unlock a submitted members_collection row for editing (head treasurer/admin roles)."""
+    _require_auth_right(auth, 'can_unlock_members_collections', context='members collection unlock')
+    actor_church = _auth_context_church(auth)
+    actor = _auth_actor_identity(auth)
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text('SELECT id, church, is_locked FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='members_collection row not found')
+            church_id = row[1]
+            _enforce_church_scope(church_id, actor_church, context='members_collection unlock')
+            if int(row[2] or 0) == 0:
+                return {'ok': True, 'already_unlocked': True}
+            conn.execute(
+                text('''
+                    UPDATE members_collection
+                    SET is_locked=0, unlocked_at=:ua, unlocked_by_user_id=:uid
+                    WHERE id=:id
+                '''),
+                {'ua': datetime.utcnow(), 'uid': actor.get('user_id'), 'id': row_id}
+            )
+        _log_collection_action('members_collection_unlock', row_id, church_id, auth, {'unlocked': True})
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/members_collection/{row_id}/delete_request')
+async def request_members_collection_delete(row_id: int, request: Request, auth: dict = Depends(require_api_key_or_user)):
+    """Create a deletion request; uploader requests require head treasurer approval."""
+    _require_auth_right(auth, 'can_manage_members_collections', context='members collection delete request')
+    actor_church = _auth_context_church(auth)
+    actor = _auth_actor_identity(auth)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    reason = str((body or {}).get('reason') or '').strip() or 'No reason provided'
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text('SELECT * FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='members_collection row not found')
+            record = dict(row._mapping)
+            church_id = record.get('church')
+            _enforce_church_scope(church_id, actor_church, context='members_collection delete request')
+            existing_pending = conn.execute(
+                text("SELECT id FROM members_collection_delete_requests WHERE row_id=:rid AND status='pending' ORDER BY id DESC LIMIT 1"),
+                {'rid': row_id}
+            ).fetchone()
+            if existing_pending:
+                return {'ok': True, 'request_id': int(existing_pending[0]), 'already_pending': True}
+            ins = conn.execute(
+                text('''
+                    INSERT INTO members_collection_delete_requests
+                    (row_id, church, requested_by_user_id, requested_by_username, requested_by_role, reason, status, row_snapshot)
+                    VALUES (:rid, :ch, :uid, :un, :role, :reason, 'pending', :snap)
+                '''),
+                {
+                    'rid': row_id,
+                    'ch': church_id,
+                    'uid': actor.get('user_id'),
+                    'un': actor.get('username'),
+                    'role': actor.get('role'),
+                    'reason': reason,
+                    'snap': _safe_json_text(record),
+                }
+            )
+            request_id = None
+            try:
+                request_id = int(ins.lastrowid)
+            except Exception:
+                created = conn.execute(text("SELECT id FROM members_collection_delete_requests WHERE row_id=:rid AND status='pending' ORDER BY id DESC LIMIT 1"), {'rid': row_id}).fetchone()
+                request_id = int(created[0]) if created else None
+        _log_collection_action('members_collection_delete_requested', row_id, church_id, auth, {'request_id': request_id, 'reason': reason})
+        return {'ok': True, 'request_id': request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/members_collection/delete_requests')
+def list_members_collection_delete_requests(status: Optional[str] = 'pending', auth: dict = Depends(require_api_key_or_user)):
+    """List delete requests for review/auditing."""
+    _require_auth_any_right(auth, {'can_delete_members_collections', 'can_unlock_members_collections'}, context='delete request review')
+    actor_church = _auth_context_church(auth)
+    try:
+        sql = 'SELECT * FROM members_collection_delete_requests WHERE 1=1'
+        params = {}
+        if status:
+            sql += ' AND LOWER(status)=:st'
+            params['st'] = str(status).strip().lower()
+        if actor_church is not None:
+            sql += ' AND church=:ch'
+            params['ch'] = actor_church
+        sql += ' ORDER BY id DESC'
+        with engine.connect() as conn:
+            rows = [dict(r._mapping) for r in conn.execute(text(sql), params).fetchall()]
+        return [{k: _serializable_value(v) for k, v in r.items()} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/members_collection/delete_requests/{request_id}/approve')
+async def approve_members_collection_delete_request(request_id: int, request: Request, auth: dict = Depends(require_api_key_or_user)):
+    """Approve and execute a pending deletion request (head treasurer/admin roles)."""
+    _require_auth_right(auth, 'can_delete_members_collections', context='delete approval')
+    actor_church = _auth_context_church(auth)
+    actor = _auth_actor_identity(auth)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    decision_note = str((body or {}).get('decision_note') or '').strip()
+    try:
+        with engine.begin() as conn:
+            req = conn.execute(text('SELECT * FROM members_collection_delete_requests WHERE id=:id'), {'id': request_id}).fetchone()
+            if not req:
+                raise HTTPException(status_code=404, detail='Delete request not found')
+            req_map = dict(req._mapping)
+            if str(req_map.get('status') or '').lower() != 'pending':
+                raise HTTPException(status_code=400, detail='Delete request is not pending')
+            row_id = int(req_map.get('row_id'))
+            church_id = req_map.get('church')
+            _enforce_church_scope(church_id, actor_church, context='delete approval')
+
+            current = conn.execute(text('SELECT * FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if not current:
+                raise HTTPException(status_code=404, detail='Target members_collection row no longer exists')
+
+            conn.execute(text('DELETE FROM members_collection WHERE id=:id'), {'id': row_id})
+            conn.execute(
+                text('''
+                    UPDATE members_collection_delete_requests
+                    SET status='approved', approved_by_user_id=:uid, approved_by_username=:un,
+                        approved_by_role=:role, decision_note=:note, decided_at=:decided
+                    WHERE id=:id
+                '''),
+                {
+                    'uid': actor.get('user_id'),
+                    'un': actor.get('username'),
+                    'role': actor.get('role'),
+                    'note': decision_note,
+                    'decided': datetime.utcnow(),
+                    'id': request_id,
+                }
+            )
+        _log_collection_action('members_collection_delete_approved', row_id, church_id, auth, {'request_id': request_id, 'decision_note': decision_note})
+        return {'ok': True, 'deleted_row_id': row_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/members_collection/delete_requests/{request_id}/reject')
+async def reject_members_collection_delete_request(request_id: int, request: Request, auth: dict = Depends(require_api_key_or_user)):
+    """Reject a pending deletion request."""
+    _require_auth_right(auth, 'can_delete_members_collections', context='delete approval rejection')
+    actor_church = _auth_context_church(auth)
+    actor = _auth_actor_identity(auth)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    decision_note = str((body or {}).get('decision_note') or '').strip()
+    try:
+        with engine.begin() as conn:
+            req = conn.execute(text('SELECT * FROM members_collection_delete_requests WHERE id=:id'), {'id': request_id}).fetchone()
+            if not req:
+                raise HTTPException(status_code=404, detail='Delete request not found')
+            req_map = dict(req._mapping)
+            if str(req_map.get('status') or '').lower() != 'pending':
+                raise HTTPException(status_code=400, detail='Delete request is not pending')
+            _enforce_church_scope(req_map.get('church'), actor_church, context='delete approval rejection')
+            conn.execute(
+                text('''
+                    UPDATE members_collection_delete_requests
+                    SET status='rejected', approved_by_user_id=:uid, approved_by_username=:un,
+                        approved_by_role=:role, decision_note=:note, decided_at=:decided
+                    WHERE id=:id
+                '''),
+                {
+                    'uid': actor.get('user_id'),
+                    'un': actor.get('username'),
+                    'role': actor.get('role'),
+                    'note': decision_note,
+                    'decided': datetime.utcnow(),
+                    'id': request_id,
+                }
+            )
+        _log_collection_action('members_collection_delete_rejected', int(req_map.get('row_id') or 0), req_map.get('church'), auth, {'request_id': request_id, 'decision_note': decision_note})
+        return {'ok': True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete('/members_collection/{row_id}')
+def delete_members_collection(row_id: int, auth: dict = Depends(require_api_key_or_user)):
+    """Direct delete for authorized roles (head treasurer/admin/system_admin)."""
+    _require_auth_right(auth, 'can_delete_members_collections', context='members collection delete')
+    actor_church = _auth_context_church(auth)
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text('SELECT church FROM members_collection WHERE id=:id'), {'id': row_id}).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='members_collection row not found')
+            church_id = row[0]
+            _enforce_church_scope(church_id, actor_church, context='members collection delete')
+            conn.execute(text('DELETE FROM members_collection WHERE id=:id'), {'id': row_id})
+        _log_collection_action('members_collection_deleted_direct', row_id, church_id, auth, {'mode': 'direct'})
+        return {'ok': True}
     except HTTPException:
         raise
     except Exception as e:
@@ -1008,6 +1344,8 @@ class RolePolicyIn(BaseModel):
     can_manage_members: bool = False
     can_manage_collections: bool = False
     can_manage_members_collections: bool = False
+    can_delete_members_collections: bool = False
+    can_unlock_members_collections: bool = False
     can_view_collection_codes: bool = False
     can_view_reports: bool = False
     can_manage_settings: bool = False
@@ -1042,6 +1380,8 @@ def create_role(payload: RolePolicyIn, current_user: dict = Depends(get_current_
             'can_manage_members': payload.can_manage_members,
             'can_manage_collections': payload.can_manage_collections,
             'can_manage_members_collections': payload.can_manage_members_collections,
+            'can_delete_members_collections': payload.can_delete_members_collections,
+            'can_unlock_members_collections': payload.can_unlock_members_collections,
             'can_view_collection_codes': payload.can_view_collection_codes,
             'can_view_reports': payload.can_view_reports,
             'can_manage_settings': payload.can_manage_settings,
@@ -1072,6 +1412,8 @@ def update_role(role_name: str, payload: RolePolicyIn, current_user: dict = Depe
             'can_manage_members': payload.can_manage_members,
             'can_manage_collections': payload.can_manage_collections,
             'can_manage_members_collections': payload.can_manage_members_collections,
+            'can_delete_members_collections': payload.can_delete_members_collections,
+            'can_unlock_members_collections': payload.can_unlock_members_collections,
             'can_view_collection_codes': payload.can_view_collection_codes,
             'can_view_reports': payload.can_view_reports,
             'can_manage_settings': payload.can_manage_settings,
@@ -1908,6 +2250,11 @@ def on_startup():
         raise
 
     _log_user_church_policy_violations()
+
+    try:
+        _ensure_collection_workflow_tables()
+    except Exception:
+        logger.exception('Failed to initialize collection workflow tables')
 
     # If members table exists but is empty, attempt to initialize from Members.xlsx
     try:

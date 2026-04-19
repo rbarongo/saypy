@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import * as XLSX from 'xlsx'
 import './styles.css'
 
 const LOCAL_API_BASE = 'http://localhost:8000'
@@ -57,6 +60,9 @@ export default function App(){
       system_admin: 'System Admin',
       admin: 'Church Admin',
       treasurer: 'Treasurer',
+      head_treasurer: 'Head Treasurer',
+      pastor: 'Pastor',
+      elder: 'Elder',
       data_steward: 'Data Steward',
       uploader: 'Uploader',
       viewer: 'Viewer',
@@ -73,9 +79,9 @@ export default function App(){
     }
     const me = String(user?.role || '').toLowerCase()
     if(me === 'system_admin'){
-      return ['admin','treasurer','data_steward','uploader','viewer','system_admin']
+      return ['admin','treasurer','head_treasurer','pastor','elder','data_steward','uploader','viewer','system_admin']
     }
-    return ['admin','treasurer','data_steward','uploader','viewer']
+    return ['admin','treasurer','head_treasurer','pastor','elder','data_steward','uploader','viewer']
   }
 
   // ----- Shared data -----
@@ -208,6 +214,8 @@ export default function App(){
     can_manage_members: false,
     can_manage_collections: false,
     can_manage_members_collections: false,
+    can_delete_members_collections: false,
+    can_unlock_members_collections: false,
     can_view_collection_codes: false,
     can_view_reports: false,
     can_manage_settings: false,
@@ -338,6 +346,8 @@ export default function App(){
         can_manage_members: false,
         can_manage_collections: false,
         can_manage_members_collections: false,
+        can_delete_members_collections: false,
+        can_unlock_members_collections: false,
         can_view_collection_codes: false,
         can_view_reports: false,
         can_manage_settings: false,
@@ -658,6 +668,10 @@ export default function App(){
   const [mcPickerRight, setMcPickerRight] = useState([])
   const [mcPickerLeftSelected, setMcPickerLeftSelected] = useState(new Set())
   const [mcPickerRightSelected, setMcPickerRightSelected] = useState(new Set())
+  const [deleteRequests, setDeleteRequests] = useState([])
+  const [deleteRequestsLoading, setDeleteRequestsLoading] = useState(false)
+  const [deleteRequestStatusFilter, setDeleteRequestStatusFilter] = useState('pending')
+  const [pendingDeleteRequestsCount, setPendingDeleteRequestsCount] = useState(0)
   // Load members when navigating to Members page
   useEffect(()=>{
     if(page==='members') fetchMembers('')
@@ -689,6 +703,10 @@ export default function App(){
       fetchMembersCollections({ limit: getDefaultMcFetchLimit(1, 10) }).then(()=>{
         // Keep error/status set by fetchMembersCollections when request fails.
       }).catch(()=>{})
+      if(hasRoleRight('can_delete_members_collections', false) || hasRoleRight('can_unlock_members_collections', false)){
+        fetchDeleteRequests(deleteRequestStatusFilter).catch(()=>{})
+        fetchPendingDeleteRequestsCount().catch(()=>{})
+      }
     }
   }, [page, currentUserChurchId, churches.length])
 
@@ -1565,6 +1583,162 @@ export default function App(){
     }
   }
 
+  async function unlockCollectionRow(rowId){
+    try{
+      const res = await authFetch(`http://localhost:8000/members_collection/${rowId}/unlock`, {
+        method: 'POST',
+        headers: authHeaders(),
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setStatus(data.already_unlocked ? 'Record already unlocked.' : 'Record unlocked for editing.')
+      await fetchMembersCollections(hasActiveMcFilters() ? {
+        search: mcApplied.text,
+        searchField: mcApplied.searchField,
+        collectionCode: mcApplied.code,
+        memberId: mcApplied.memberId,
+        memberName: mcApplied.memberName,
+        s1: mcApplied.s1,
+        from: mcApplied.from,
+        to: mcApplied.to,
+        amountMin: mcApplied.amountMin,
+        amountMax: mcApplied.amountMax,
+      } : { limit: getDefaultMcFetchLimit(mcPage, mcPageSize) })
+    }catch(e){
+      setStatus('Unlock failed: ' + (e?.message || String(e)))
+    }
+  }
+
+  async function requestCollectionDelete(rowId){
+    try{
+      const reason = window.prompt('Reason for delete request (sent for head treasurer approval):', 'Correction')
+      if(reason === null) return
+      const res = await authFetch(`http://localhost:8000/members_collection/${rowId}/delete_request`, {
+        method: 'POST',
+        headers: authHeaders({'Content-Type':'application/json'}),
+        body: JSON.stringify({reason}),
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setStatus(data.already_pending ? `Delete request already pending (#${data.request_id}).` : `Delete request submitted (#${data.request_id || '-'})`) 
+      if(hasRoleRight('can_delete_members_collections', false) || hasRoleRight('can_unlock_members_collections', false)){
+        await fetchDeleteRequests(deleteRequestStatusFilter)
+        await fetchPendingDeleteRequestsCount()
+      }
+    }catch(e){
+      setStatus('Delete request failed: ' + (e?.message || String(e)))
+    }
+  }
+
+  async function fetchPendingDeleteRequestsCount(){
+    if(!(hasRoleRight('can_delete_members_collections', false) || hasRoleRight('can_unlock_members_collections', false))){
+      setPendingDeleteRequestsCount(0)
+      return 0
+    }
+    try{
+      const res = await authFetch('http://localhost:8000/members_collection/delete_requests?status=pending', {
+        headers: authHeaders(),
+      })
+      const data = await res.json().catch(()=>[])
+      if(!res.ok) throw new Error(data?.detail || JSON.stringify(data))
+      const count = Array.isArray(data) ? data.length : 0
+      setPendingDeleteRequestsCount(count)
+      return count
+    }catch(e){
+      setPendingDeleteRequestsCount(0)
+      return 0
+    }
+  }
+
+  async function fetchDeleteRequests(statusFilter = deleteRequestStatusFilter){
+    if(!(hasRoleRight('can_delete_members_collections', false) || hasRoleRight('can_unlock_members_collections', false))){
+      setDeleteRequests([])
+      return []
+    }
+    setDeleteRequestsLoading(true)
+    try{
+      const q = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : ''
+      const res = await authFetch(`http://localhost:8000/members_collection/delete_requests${q}`, {
+        headers: authHeaders(),
+      })
+      const data = await res.json().catch(()=>[])
+      if(!res.ok) throw new Error(data?.detail || JSON.stringify(data))
+      const rows = Array.isArray(data) ? data : []
+      setDeleteRequests(rows)
+      if(String(statusFilter || '').toLowerCase() === 'pending'){
+        setPendingDeleteRequestsCount(rows.length)
+      }
+      return rows
+    }catch(e){
+      setDeleteRequests([])
+      setStatus('Delete requests load failed: ' + (e?.message || String(e)))
+      return []
+    }finally{
+      setDeleteRequestsLoading(false)
+    }
+  }
+
+  async function decideDeleteRequest(requestId, action){
+    const verb = action === 'approve' ? 'approve' : 'reject'
+    const isApprove = verb === 'approve'
+    if(isApprove && !window.confirm('Approve this request and delete the target record now?')) return
+    const note = window.prompt(`Optional decision note for ${verb}:`, '')
+    if(note === null) return
+    try{
+      const res = await authFetch(`http://localhost:8000/members_collection/delete_requests/${requestId}/${verb}`, {
+        method: 'POST',
+        headers: authHeaders({'Content-Type':'application/json'}),
+        body: JSON.stringify({decision_note: note || ''}),
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data?.detail || JSON.stringify(data))
+      setStatus(`Delete request #${requestId} ${isApprove ? 'approved' : 'rejected'}.`)
+      await fetchDeleteRequests(deleteRequestStatusFilter)
+      await fetchPendingDeleteRequestsCount()
+      await fetchMembersCollections(hasActiveMcFilters() ? {
+        search: mcApplied.text,
+        searchField: mcApplied.searchField,
+        collectionCode: mcApplied.code,
+        memberId: mcApplied.memberId,
+        memberName: mcApplied.memberName,
+        s1: mcApplied.s1,
+        from: mcApplied.from,
+        to: mcApplied.to,
+        amountMin: mcApplied.amountMin,
+        amountMax: mcApplied.amountMax,
+      } : { limit: getDefaultMcFetchLimit(mcPage, mcPageSize) })
+    }catch(e){
+      setStatus(`Delete request ${verb} failed: ` + (e?.message || String(e)))
+    }
+  }
+
+  async function approveAndDeleteCollectionRow(rowId){
+    try{
+      if(!window.confirm('Delete this record now? This action is audited.')) return
+      const res = await authFetch(`http://localhost:8000/members_collection/${rowId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      })
+      const data = await res.json().catch(()=>({}))
+      if(!res.ok) throw new Error(data.detail || JSON.stringify(data))
+      setStatus('Record deleted successfully.')
+      await fetchMembersCollections(hasActiveMcFilters() ? {
+        search: mcApplied.text,
+        searchField: mcApplied.searchField,
+        collectionCode: mcApplied.code,
+        memberId: mcApplied.memberId,
+        memberName: mcApplied.memberName,
+        s1: mcApplied.s1,
+        from: mcApplied.from,
+        to: mcApplied.to,
+        amountMin: mcApplied.amountMin,
+        amountMax: mcApplied.amountMax,
+      } : { limit: getDefaultMcFetchLimit(mcPage, mcPageSize) })
+    }catch(e){
+      setStatus('Delete failed: ' + (e?.message || String(e)))
+    }
+  }
+
   function buildSelectedReport(){    const entries = buildReportEntries()
     if(!entries.length){
       setBuiltReportRows([])
@@ -1692,6 +1866,216 @@ export default function App(){
     return new Intl.NumberFormat().format(Number(value))
   }
 
+  function currentChurchName(){
+    if(!currentUserChurchId) return 'Local Church'
+    const found = (churches || []).find(c => Number(c?.id) === Number(currentUserChurchId))
+    const name = String(found?.name || '').trim()
+    return name || 'Local Church'
+  }
+
+  function periodSummaryPeriodText(){
+    const fromText = periodSummaryFrom || 'All'
+    const toText = periodSummaryTo || 'All'
+    return `${fromText} to ${toText}`
+  }
+
+  function periodSummaryFileStamp(){
+    const fromText = (periodSummaryFrom || 'all').replace(/[^0-9A-Za-z_-]/g, '_')
+    const toText = (periodSummaryTo || 'all').replace(/[^0-9A-Za-z_-]/g, '_')
+    return `${fromText}_${toText}`
+  }
+
+  function exportPeriodSummaryExcel(){
+    try{
+      if(!periodSummaryRows.length){
+        setStatus('No period summary data to export.')
+        return
+      }
+      const churchLabel = currentChurchName()
+      const localHeader = churchLabel
+      const periodText = periodSummaryPeriodText()
+
+      const aoa = [
+        ['Period Summary Report'],
+        [`Church: ${churchLabel}`],
+        [`Period: ${periodText}`],
+        [],
+        ['Collection Item', 'Conference', localHeader, 'Jumla / Total'],
+      ]
+
+      periodSummaryRows.forEach((row)=>{
+        aoa.push([
+          String(row?.item || ''),
+          Number(row?.conference || 0),
+          Number(row?.local || 0),
+          Number(row?.total || 0),
+        ])
+      })
+
+      aoa.push([
+        'TOTAL',
+        Number(periodSummaryTotals?.conference || 0),
+        Number(periodSummaryTotals?.local || 0),
+        Number(periodSummaryTotals?.total || 0),
+      ])
+
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.aoa_to_sheet(aoa)
+      ws['!cols'] = [
+        { wch: 40 },
+        { wch: 18 },
+        { wch: 24 },
+        { wch: 18 },
+      ]
+      XLSX.utils.book_append_sheet(wb, ws, 'Period Summary')
+      XLSX.writeFile(wb, `period_summary_${periodSummaryFileStamp()}.xlsx`)
+      setStatus('Period summary exported to Excel.')
+    }catch(e){
+      setStatus('Excel export failed: ' + (e?.message || String(e)))
+    }
+  }
+
+  function exportPeriodSummaryPdf(){
+    try{
+      if(!periodSummaryRows.length){
+        setStatus('No period summary data to export.')
+        return
+      }
+      const churchLabel = currentChurchName()
+      const localHeader = churchLabel
+      const periodText = periodSummaryPeriodText()
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+      doc.setFontSize(15)
+      doc.setTextColor(15, 23, 42)
+      doc.text('Period Summary Report', 40, 42)
+      doc.setFontSize(11)
+      doc.text(`Church: ${churchLabel}`, 40, 60)
+      doc.text(`Period: ${periodText}`, 40, 76)
+
+      const body = (periodSummaryRows || []).map((row)=> ([
+        String(row?.item || ''),
+        formatNumber(row?.conference || 0),
+        formatNumber(row?.local || 0),
+        formatNumber(row?.total || 0),
+      ]))
+      body.push([
+        'TOTAL',
+        formatNumber(periodSummaryTotals?.conference || 0),
+        formatNumber(periodSummaryTotals?.local || 0),
+        formatNumber(periodSummaryTotals?.total || 0),
+      ])
+
+      autoTable(doc, {
+        startY: 92,
+        head: [['Collection Item', 'Conference', localHeader, 'Jumla / Total']],
+        body,
+        theme: 'grid',
+        headStyles: { fillColor: [248, 180, 0], textColor: [0, 0, 0], fontStyle: 'bold' },
+        styles: { textColor: [15, 23, 42], lineColor: [203, 213, 225], lineWidth: 0.5, fontSize: 10 },
+        columnStyles: {
+          0: { halign: 'left', cellWidth: 230 },
+          1: { halign: 'right', cellWidth: 90 },
+          2: { halign: 'right', cellWidth: 110 },
+          3: { halign: 'right', cellWidth: 90 },
+        },
+        didParseCell: (data) => {
+          if(data.row.index === body.length - 1){
+            data.cell.styles.fontStyle = 'bold'
+            data.cell.styles.fillColor = [248, 250, 252]
+          }
+        }
+      })
+
+      doc.save(`period_summary_${periodSummaryFileStamp()}.pdf`)
+      setStatus('Period summary exported to PDF.')
+    }catch(e){
+      setStatus('PDF export failed: ' + (e?.message || String(e)))
+    }
+  }
+
+  function currentBuiltReportDataset(){
+    if(Array.isArray(builtReportRows) && builtReportRows.length && Array.isArray(builtReportColumns) && builtReportColumns.length){
+      return {
+        title: reportBuilderOptions.find(r=> r.id===selectedReportBuilder)?.title || 'Built Report',
+        columns: builtReportColumns,
+        rows: builtReportRows,
+      }
+    }
+    if(Array.isArray(meetingSummaryRows) && meetingSummaryRows.length){
+      const rows = [...meetingSummaryRows, {
+        item: 'TOTAL',
+        local: meetingSummaryTotals?.local || 0,
+        conference: meetingSummaryTotals?.conference || 0,
+        total: meetingSummaryTotals?.total || 0,
+      }]
+      return {
+        title: 'Meeting Summary Form',
+        columns: ['item', 'local', 'conference', 'total'],
+        rows,
+      }
+    }
+    return null
+  }
+
+  function exportBuiltReportExcel(){
+    try{
+      const dataset = currentBuiltReportDataset()
+      if(!dataset){ setStatus('Build a report first before export.'); return }
+      const prettyCols = dataset.columns.map(c=>labelForColumn(c))
+      const aoa = [
+        [dataset.title],
+        [`Church: ${currentChurchName()}`],
+        [`Period: ${reportFrom || 'All'} to ${reportTo || 'All'}`],
+        [],
+        prettyCols,
+      ]
+      dataset.rows.forEach(row=>{
+        aoa.push(dataset.columns.map(col=> row?.[col] ?? ''))
+      })
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.aoa_to_sheet(aoa)
+      ws['!cols'] = dataset.columns.map((col, idx)=> ({ wch: idx === 0 ? 30 : 18 }))
+      XLSX.utils.book_append_sheet(wb, ws, 'Report')
+      const stamp = `${(reportFrom || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}_${(reportTo || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}`
+      XLSX.writeFile(wb, `report_builder_${stamp}.xlsx`)
+      setStatus('Built report exported to Excel.')
+    }catch(e){
+      setStatus('Built report Excel export failed: ' + (e?.message || String(e)))
+    }
+  }
+
+  function exportBuiltReportPdf(){
+    try{
+      const dataset = currentBuiltReportDataset()
+      if(!dataset){ setStatus('Build a report first before export.'); return }
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+      doc.setFontSize(14)
+      doc.text(dataset.title, 36, 36)
+      doc.setFontSize(10)
+      doc.text(`Church: ${currentChurchName()}`, 36, 52)
+      doc.text(`Period: ${reportFrom || 'All'} to ${reportTo || 'All'}`, 36, 66)
+      const head = [dataset.columns.map(c=>labelForColumn(c))]
+      const body = dataset.rows.map(row=> dataset.columns.map(col=>{
+        const v = row?.[col]
+        return ['amount','local','conference','total'].includes(String(col)) ? formatNumber(v) : String(v ?? '')
+      }))
+      autoTable(doc, {
+        startY: 78,
+        head,
+        body,
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 9, textColor: [15, 23, 42] },
+      })
+      const stamp = `${(reportFrom || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}_${(reportTo || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}`
+      doc.save(`report_builder_${stamp}.pdf`)
+      setStatus('Built report exported to PDF.')
+    }catch(e){
+      setStatus('Built report PDF export failed: ' + (e?.message || String(e)))
+    }
+  }
+
   function currentRolePolicy(){
     const role = String(user?.role || '').toLowerCase()
     return (rolesCatalog || []).find(r => String(r.role || '').toLowerCase() === role) || null
@@ -1701,11 +2085,13 @@ export default function App(){
     const role = String(user?.role || '').toLowerCase()
     if(role === 'system_admin') return true
     const compatibility = {
-      can_manage_members_collections: new Set(['admin','treasurer','data_steward','uploader','viewer']),
-      can_view_collection_codes: new Set(['admin','treasurer','uploader','viewer']),
-      can_manage_collections: new Set(['admin','treasurer','uploader']),
+      can_manage_members_collections: new Set(['admin','treasurer','head_treasurer','data_steward','uploader','viewer']),
+      can_delete_members_collections: new Set(['admin','head_treasurer']),
+      can_unlock_members_collections: new Set(['admin','head_treasurer']),
+      can_view_collection_codes: new Set(['admin','treasurer','head_treasurer','uploader','viewer']),
+      can_manage_collections: new Set(['admin','treasurer','head_treasurer','uploader']),
       can_manage_members: new Set(['admin','data_steward']),
-      can_view_reports: new Set(['admin','treasurer','data_steward','viewer']),
+      can_view_reports: new Set(['admin','treasurer','head_treasurer','pastor','elder','data_steward','viewer']),
     }
     const rp = currentRolePolicy()
     if(!rp) return fallback
@@ -2124,6 +2510,8 @@ export default function App(){
                       <label><input type='checkbox' checked={!!newRole.can_manage_members} onChange={e=>setNewRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> Members</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_collections} onChange={e=>setNewRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> Collections</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_members_collections} onChange={e=>setNewRole(prev=>({...prev, can_manage_members_collections:e.target.checked}))} /> Members Collections</label>
+                      <label><input type='checkbox' checked={!!newRole.can_delete_members_collections} onChange={e=>setNewRole(prev=>({...prev, can_delete_members_collections:e.target.checked}))} /> Delete Collections</label>
+                      <label><input type='checkbox' checked={!!newRole.can_unlock_members_collections} onChange={e=>setNewRole(prev=>({...prev, can_unlock_members_collections:e.target.checked}))} /> Unlock Collections</label>
                       <label><input type='checkbox' checked={!!newRole.can_view_collection_codes} onChange={e=>setNewRole(prev=>({...prev, can_view_collection_codes:e.target.checked}))} /> View Collection Codes</label>
                       <label><input type='checkbox' checked={!!newRole.can_view_reports} onChange={e=>setNewRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> Reports</label>
                       <label><input type='checkbox' checked={!!newRole.can_manage_settings} onChange={e=>setNewRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> Settings</label>
@@ -2142,6 +2530,8 @@ export default function App(){
                           <th>Members</th>
                           <th>Collections</th>
                           <th>Members Collections</th>
+                          <th>Delete Collections</th>
+                          <th>Unlock Collections</th>
                           <th>View Collection Codes</th>
                           <th>Reports</th>
                           <th>Settings</th>
@@ -2159,6 +2549,8 @@ export default function App(){
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_members} onChange={e=>setEditingRole(prev=>({...prev, can_manage_members:e.target.checked}))} /> : (r.can_manage_members ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_collections} onChange={e=>setEditingRole(prev=>({...prev, can_manage_collections:e.target.checked}))} /> : (r.can_manage_collections ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_members_collections} onChange={e=>setEditingRole(prev=>({...prev, can_manage_members_collections:e.target.checked}))} /> : (r.can_manage_members_collections ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_delete_members_collections} onChange={e=>setEditingRole(prev=>({...prev, can_delete_members_collections:e.target.checked}))} /> : (r.can_delete_members_collections ? 'Yes':'No')}</td>
+                            <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_unlock_members_collections} onChange={e=>setEditingRole(prev=>({...prev, can_unlock_members_collections:e.target.checked}))} /> : (r.can_unlock_members_collections ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_view_collection_codes} onChange={e=>setEditingRole(prev=>({...prev, can_view_collection_codes:e.target.checked}))} /> : (r.can_view_collection_codes ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_view_reports} onChange={e=>setEditingRole(prev=>({...prev, can_view_reports:e.target.checked}))} /> : (r.can_view_reports ? 'Yes':'No')}</td>
                             <td>{editingRole && editingRole.role===r.role ? <input type='checkbox' checked={!!editingRole.can_manage_settings} onChange={e=>setEditingRole(prev=>({...prev, can_manage_settings:e.target.checked}))} /> : (r.can_manage_settings ? 'Yes':'No')}</td>
@@ -2673,6 +3065,80 @@ export default function App(){
               <button onClick={exportMembersCollectionsPdf}>Export PDF</button>
             </div>
 
+            {(hasRoleRight('can_delete_members_collections', false) || hasRoleRight('can_unlock_members_collections', false)) && (
+              <div className='card' style={{marginBottom:12}}>
+                <h4 style={{marginTop:0, display:'flex', alignItems:'center', gap:8}}>
+                  <span>Delete Requests</span>
+                  <span style={{display:'inline-block',padding:'2px 8px',borderRadius:999,background:'#fef3c7',color:'#92400e',fontSize:12,fontWeight:800}}>
+                    Pending: {pendingDeleteRequestsCount}
+                  </span>
+                </h4>
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:8}}>
+                  <label>Status</label>
+                  <select value={deleteRequestStatusFilter} onChange={e=>setDeleteRequestStatusFilter(e.target.value)}>
+                    <option value='pending'>Pending</option>
+                    <option value='approved'>Approved</option>
+                    <option value='rejected'>Rejected</option>
+                    <option value=''>All</option>
+                  </select>
+                  <button onClick={async ()=>{
+                    await fetchDeleteRequests(deleteRequestStatusFilter)
+                    if(String(deleteRequestStatusFilter || '').toLowerCase() !== 'pending'){
+                      await fetchPendingDeleteRequestsCount()
+                    }
+                  }} disabled={deleteRequestsLoading}>
+                    {deleteRequestsLoading ? 'Loading...' : 'Refresh Requests'}
+                  </button>
+                </div>
+                <div className='table-wrap' style={mainGridWrapStyle(220)}>
+                  <table style={mainGridTableStyle(true)}>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Row ID</th>
+                        <th>Status</th>
+                        <th>Reason</th>
+                        <th>Requested By</th>
+                        <th>Requested At</th>
+                        <th>Decision Note</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deleteRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan={8}>No delete requests found for selected filter.</td>
+                        </tr>
+                      ) : deleteRequests.map(req=>{
+                        const isPending = String(req?.status || '').toLowerCase() === 'pending'
+                        return (
+                          <tr key={req.id}>
+                            <td>{req.id}</td>
+                            <td>{req.row_id}</td>
+                            <td>{req.status}</td>
+                            <td>{req.reason || ''}</td>
+                            <td>{req.requested_by_username || req.requested_by_role || '-'}</td>
+                            <td>{req.created_at ? new Date(req.created_at).toLocaleString() : ''}</td>
+                            <td>{req.decision_note || ''}</td>
+                            <td>
+                              {isPending && hasRoleRight('can_delete_members_collections', false) ? (
+                                <>
+                                  <button onClick={()=>decideDeleteRequest(req.id, 'approve')}>Approve</button>
+                                  <button style={{marginLeft:6}} onClick={()=>decideDeleteRequest(req.id, 'reject')}>Reject</button>
+                                </>
+                              ) : (
+                                <span style={{color:'#64748b'}}>No action</span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div style={{marginBottom:10,padding:'10px 12px',border:'1px solid #ddd',borderRadius:8,background:'#f8fafc'}}>
               <button onClick={openMcColumnPicker} style={{background:'none',border:'none',color:'#0a58ca',textDecoration:'underline',cursor:'pointer',padding:0,fontSize:13,fontWeight:700}}>
                 Column Picker ({getMcDisplayColumns().length} visible)
@@ -2842,6 +3308,14 @@ export default function App(){
                           })}
                           <td>
                             <button onClick={()=>{ setEditingCollection({...r}); }}>Edit</button>
+                            {Number(r?.is_locked || 0) === 1 && hasRoleRight('can_unlock_members_collections', false) && (
+                              <button style={{marginLeft:6}} onClick={()=>unlockCollectionRow(r.id)}>Unlock</button>
+                            )}
+                            {hasRoleRight('can_delete_members_collections', false) ? (
+                              <button style={{marginLeft:6}} onClick={()=>approveAndDeleteCollectionRow(r.id)}>Delete</button>
+                            ) : (
+                              <button style={{marginLeft:6}} onClick={()=>requestCollectionDelete(r.id)}>Request Delete</button>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -2876,6 +3350,9 @@ export default function App(){
             {editingCollection && (
               <div className='card' style={{marginTop:12}}>
                 <h4>Edit Collection #{editingCollection.id}</h4>
+                <div style={{fontSize:12,fontWeight:700,marginBottom:8,color:Number(editingCollection?.is_locked || 0)===1 ? '#b45309' : '#166534'}}>
+                  Status: {Number(editingCollection?.is_locked || 0)===1 ? 'Locked (requires unlock before save)' : 'Unlocked'}
+                </div>
                 <div className='form-row'>
                   { (membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['collection_code','member_id','church','s1','s2','s3','s4','s5']).map(k=>{
                     if(k==='id' || k==='added_at') return null
@@ -2973,22 +3450,27 @@ export default function App(){
             <h3>Reports</h3>
 
             {/* ===== Period Summary Report ===== */}
-            <div style={{border:'1px solid #d1d5db', borderRadius:10, padding:14, marginBottom:16, background:'#fff'}}>
-              <div style={{fontWeight:800, fontSize:15, color:'#0f172a', marginBottom:6}}>Period Summary Report</div>
-              <div style={{fontSize:12, color:'#475569', marginBottom:10}}>
+            <div style={{border:'1px solid #64748b', borderRadius:10, padding:14, marginBottom:16, background:'#ffffff'}}>
+              <div style={{fontWeight:900, fontSize:18, color:'#0b1220', marginBottom:6, letterSpacing:0.2}}>Period Summary Report</div>
+              <div style={{fontSize:14, color:'#1e293b', marginBottom:10, fontWeight:600}}>
                 Aggregated collection summary by item, split into Conference and Local Church amounts.
               </div>
               <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:10}}>
-                <label>From:</label>
+                <label style={{fontWeight:700, color:'#0f172a'}}>From:</label>
                 <input type='date' value={periodSummaryFrom} onChange={e=>setPeriodSummaryFrom(e.target.value)} />
-                <label>To:</label>
+                <label style={{fontWeight:700, color:'#0f172a'}}>To:</label>
                 <input type='date' value={periodSummaryTo} onChange={e=>setPeriodSummaryTo(e.target.value)} />
                 <button type='button' onClick={fetchPeriodSummary} disabled={periodSummaryLoading}>{periodSummaryLoading ? 'Loading...' : 'Generate Summary'}</button>
+                <button type='button' onClick={exportPeriodSummaryPdf} disabled={periodSummaryLoading || periodSummaryRows.length === 0}>Export PDF</button>
+                <button type='button' onClick={exportPeriodSummaryExcel} disabled={periodSummaryLoading || periodSummaryRows.length === 0}>Export Excel</button>
               </div>
 
               {periodSummaryRows.length > 0 && (
                 <div>
-                  <div style={{fontSize:12, color:'#475569', marginBottom:6}}>
+                  <div style={{fontSize:14, color:'#0f172a', marginBottom:6, fontWeight:700}}>
+                    Church: <strong>{currentChurchName()}</strong>
+                  </div>
+                  <div style={{fontSize:14, color:'#0f172a', marginBottom:6, fontWeight:700}}>
                     Period: <strong>{periodSummaryFrom || 'All'}</strong> to <strong>{periodSummaryTo || 'All'}</strong>
                   </div>
                   <div style={mainGridWrapStyle(380)}>
@@ -2997,20 +3479,20 @@ export default function App(){
                         <tr>
                           <th style={{textAlign:'left', background:'#f8b400', color:'#000'}}>Collection Item</th>
                           <th style={{background:'#f8b400', color:'#000'}}>Conference</th>
-                          <th style={{background:'#f8b400', color:'#000'}}>Local Church</th>
+                          <th style={{background:'#f8b400', color:'#000'}}>{currentChurchName()}</th>
                           <th style={{background:'#f8b400', color:'#000'}}>Jumla / Total</th>
                         </tr>
                       </thead>
                       <tbody>
                         {periodSummaryRows.map((row, idx)=> (
                           <tr key={idx}>
-                            <td style={{fontWeight:600}}>{row.item}</td>
-                            <td style={{textAlign:'right'}}>{row.conference !== 0 ? formatNumber(row.conference) : '-'}</td>
-                            <td style={{textAlign:'right'}}>{row.local !== 0 ? formatNumber(row.local) : '-'}</td>
-                            <td style={{textAlign:'right'}}>{formatNumber(row.total)}</td>
+                            <td style={{fontWeight:700, color:'#0f172a'}}>{row.item}</td>
+                            <td style={{textAlign:'right', color:'#0f172a', fontWeight:700}}>{row.conference !== 0 ? formatNumber(row.conference) : '-'}</td>
+                            <td style={{textAlign:'right', color:'#0f172a', fontWeight:700}}>{row.local !== 0 ? formatNumber(row.local) : '-'}</td>
+                            <td style={{textAlign:'right', color:'#0f172a', fontWeight:800}}>{formatNumber(row.total)}</td>
                           </tr>
                         ))}
-                        <tr style={{fontWeight:900, borderTop:'2px solid #334155', background:'#f8fafc'}}>
+                        <tr style={{fontWeight:900, borderTop:'2px solid #1e293b', background:'#f8fafc', color:'#0f172a'}}>
                           <td>TOTAL</td>
                           <td style={{textAlign:'right'}}>{formatNumber(periodSummaryTotals.conference)}</td>
                           <td style={{textAlign:'right'}}>{formatNumber(periodSummaryTotals.local)}</td>
@@ -3022,7 +3504,7 @@ export default function App(){
                 </div>
               )}
               {!periodSummaryLoading && periodSummaryRows.length === 0 && (
-                <div style={{color:'#94a3b8', fontSize:12}}>No data yet — pick a date range and click Generate Summary.</div>
+                <div style={{color:'#334155', fontSize:13, fontWeight:600}}>No data yet — pick a date range and click Generate Summary.</div>
               )}
             </div>
 
@@ -3065,6 +3547,8 @@ export default function App(){
                 </div>
                 <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
                   <button type='button' onClick={buildSelectedReport}>Build Selected Report</button>
+                  <button type='button' onClick={exportBuiltReportPdf}>Export Built PDF</button>
+                  <button type='button' onClick={exportBuiltReportExcel}>Export Built Excel</button>
                   <span style={{fontSize:12, color:'#64748b'}}>Selected: {reportBuilderOptions.find(r=> r.id===selectedReportBuilder)?.title}</span>
                 </div>
               </div>
