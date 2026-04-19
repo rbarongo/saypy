@@ -3741,28 +3741,43 @@ export default function App(){
                       const selectedMemberIdentity = Number(selectedMemberId)
                       const selectedMemberProfileIdRaw = memberForm?.MEMBER_ID ?? memberForm?.member_id ?? editingMember?.MEMBER_ID ?? editingMember?.member_id
                       const selectedMemberProfileId = Number(selectedMemberProfileIdRaw)
-                      const selectedMemberName = String(memberForm?.MEMBER_NAME || memberForm?.member_name || editingMember?.MEMBER_NAME || editingMember?.member_name || '').trim()
+                      const clickedMemberRow = (members || []).find(m => Number(m?.id) === Number(editingMember?.id))
+                        || (members || []).find(m => Number(m?.MEMBER_ID ?? m?.member_id) === selectedMemberProfileId)
+                      const selectedMemberRealIdRaw = clickedMemberRow?.MEMBER_ID ?? clickedMemberRow?.member_id ?? selectedMemberProfileIdRaw
+                      const selectedMemberRealId = Number(selectedMemberRealIdRaw)
+                      const selectedMemberName = String(
+                        memberForm?.MEMBER_NAME ||
+                        memberForm?.member_name ||
+                        clickedMemberRow?.MEMBER_NAME ||
+                        clickedMemberRow?.member_name ||
+                        editingMember?.MEMBER_NAME ||
+                        editingMember?.member_name ||
+                        ''
+                      ).trim()
                       const seenIdentity = new Set()
                       const identityOptions = []
 
-                      if(Number.isFinite(selectedMemberProfileId) && selectedMemberProfileId > 0){
-                        seenIdentity.add(selectedMemberProfileId)
+                      if(Number.isFinite(selectedMemberRealId) && selectedMemberRealId > 0){
+                        seenIdentity.add(selectedMemberRealId)
                         identityOptions.push({
-                          value: selectedMemberProfileId,
-                          label: `${selectedMemberName || 'Selected Member'} (ID:${selectedMemberProfileId})`,
+                          value: selectedMemberRealId,
+                          label: `${selectedMemberName || 'Selected Member'} (ID:${selectedMemberRealId})`,
                         })
                       }
 
-                      ;(filteredMembers || []).forEach(m=>{
+                      const sourceMembers = (filteredMembers && filteredMembers.length ? filteredMembers : (members || []))
+                      ;(sourceMembers || []).forEach(m=>{
                         const uniqueRaw = m?.OFFICIAL_MEMBER_ID ?? m?.official_member_id
                         const uniqueVal = Number(uniqueRaw)
                         if(!Number.isFinite(uniqueVal) || uniqueVal <= 0) return
                         if(seenIdentity.has(uniqueVal)) return
                         seenIdentity.add(uniqueVal)
-                        const memberName = String(m?.MEMBER_NAME || m?.member_name || '').trim() || 'Unknown Member'
-                        const memberId = m?.MEMBER_ID ?? m?.member_id
-                        const displayId = (memberId !== null && memberId !== undefined && String(memberId).trim() !== '') ? memberId : uniqueVal
-                        identityOptions.push({ value: uniqueVal, label: `${memberName} (ID:${displayId})` })
+                        const canonical = (members || []).find(mm => Number(mm?.MEMBER_ID ?? mm?.member_id) === uniqueVal)
+                          || (members || []).find(mm => Number(mm?.OFFICIAL_MEMBER_ID ?? mm?.official_member_id) === uniqueVal)
+                        const canonicalName = String(canonical?.MEMBER_NAME || canonical?.member_name || m?.MEMBER_NAME || m?.member_name || '').trim() || 'Unknown Member'
+                        const canonicalId = canonical?.MEMBER_ID ?? canonical?.member_id
+                        const displayId = (canonicalId !== null && canonicalId !== undefined && String(canonicalId).trim() !== '') ? canonicalId : uniqueVal
+                        identityOptions.push({ value: uniqueVal, label: `${canonicalName} (ID:${displayId})` })
                       })
 
                       if(Number.isFinite(selectedMemberIdentity) && selectedMemberIdentity > 0 && !seenIdentity.has(selectedMemberIdentity)){
