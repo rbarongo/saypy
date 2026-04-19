@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Optional
 import math
+import re
 
 import pandas as pd
 from sqlalchemy import text
@@ -214,6 +215,14 @@ def _coerce_collection_datetime_series(series: pd.Series) -> pd.Series:
     return dt
 
 
+def _is_contribution_code(col_name: str) -> bool:
+    """Return True for columns that represent contribution items, not metadata fields."""
+    c = str(col_name or '').strip().lower()
+    if re.fullmatch(r'(c|l)\d+', c):
+        return True
+    return c in {'s6', 's7', 's8', 's9', 's13'}
+
+
 def _iter_members_collection_chunks(chunk_size: int = 5000):
     """Yield members_collection rows in manageable chunks."""
     query = text('SELECT * FROM members_collection')
@@ -274,7 +283,9 @@ def compute_period_summary(
     # ---- build code map ---------------------------------------------------
     code_map = _build_code_map(actor_church)
     code_map = _apply_label_overrides(code_map)
+    code_map = {k: v for k, v in code_map.items() if _is_contribution_code(k)}
     code_alias_map = _build_code_alias_map(actor_church)
+    code_alias_map = {k: v for k, v in code_alias_map.items() if _is_contribution_code(v)}
 
     if not code_map:
         return empty_result
@@ -341,7 +352,7 @@ def compute_period_summary(
             if info is not None and amount == 0.0 and 's5' in df.columns:
                 amount = _finite_amount(row.get('s5'))
 
-            # If collection_code is missing (legacy rows), infer item from a mapped amount column.
+            # If collection_code is missing (legacy rows), infer item from a mapped contribution column.
             if (not col_lower or info is None) and amount == 0.0:
                 for mc in mapped_amount_cols:
                     mv = _finite_amount(row.get(mc))
