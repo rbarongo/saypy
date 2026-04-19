@@ -920,6 +920,124 @@ export default function App(){
     return v===null||v===undefined? '': String(v);
   }
 
+  function normalizeCollectionFieldKey(col){
+    return String(col || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+  }
+
+  function isCollectionReferenceIdField(col){
+    const key = normalizeCollectionFieldKey(col)
+    if(!key || key === 'id' || key === 'church') return false
+    if(!key.endsWith('_id')) return false
+    return /(member|official|group|family)/.test(key)
+  }
+
+  function memberLookupColumnForCollectionField(col){
+    const key = normalizeCollectionFieldKey(col)
+    const rows = Array.isArray(membersLocal) ? membersLocal : []
+    const hasColumn = (candidate)=> rows.some(m => m && Object.prototype.hasOwnProperty.call(m, candidate))
+    const preferredMap = {
+      member_id: 'MEMBER_ID',
+      official_member_id: 'OFFICIAL_MEMBER_ID',
+      group_id: 'GROUP_ID',
+      family_id: 'FAMILY_ID',
+      default_family_id: 'DEFAULT_FAMILY_ID',
+    }
+    const preferred = preferredMap[key]
+    if(preferred && hasColumn(preferred)) return preferred
+    if(preferred && hasColumn(preferred.toLowerCase())) return preferred.toLowerCase()
+    if(hasColumn('MEMBER_ID')) return 'MEMBER_ID'
+    if(hasColumn('member_id')) return 'member_id'
+    if(preferred) return preferred
+    return 'MEMBER_ID'
+  }
+
+  function findMemberByCollectionFieldValue(col, value){
+    const text = String(value ?? '').trim()
+    if(!text) return null
+    const source = memberLookupColumnForCollectionField(col)
+    const candidates = [
+      source,
+      String(source || '').toLowerCase(),
+      String(source || '').toUpperCase(),
+      'MEMBER_ID',
+      'member_id',
+      'OFFICIAL_MEMBER_ID',
+      'official_member_id',
+      'GROUP_ID',
+      'group_id',
+      'FAMILY_ID',
+      'family_id',
+      'DEFAULT_FAMILY_ID',
+      'default_family_id',
+      'id',
+    ].filter(Boolean)
+    return (membersLocal || []).find(m => candidates.some(c => String(m?.[c] ?? '').trim() === text)) || null
+  }
+
+  function memberTranslationSummary(member){
+    if(!member) return ''
+    const parts = []
+    const name = String(member.MEMBER_NAME || member.member_name || '').trim()
+    if(name) parts.push(name)
+    const memberId = member.MEMBER_ID ?? member.member_id
+    if(memberId !== undefined && memberId !== null && String(memberId).trim() !== '') parts.push(`Member ID: ${memberId}`)
+    const officialId = member.OFFICIAL_MEMBER_ID ?? member.official_member_id
+    if(officialId !== undefined && officialId !== null && String(officialId).trim() !== '') parts.push(`Official ID: ${officialId}`)
+    const groupId = member.GROUP_ID ?? member.group_id
+    if(groupId !== undefined && groupId !== null && String(groupId).trim() !== '') parts.push(`Group ID: ${groupId}`)
+    const familyId = member.FAMILY_ID ?? member.family_id
+    if(familyId !== undefined && familyId !== null && String(familyId).trim() !== '') parts.push(`Family ID: ${familyId}`)
+    return parts.join(' | ')
+  }
+
+  function collectionFieldTranslation(col, value){
+    const key = normalizeCollectionFieldKey(col)
+    const raw = value === null || value === undefined ? '' : String(value).trim()
+    if(!raw) return ''
+    if(key === 'church'){
+      return (churches || []).find(c => Number(c.id) === Number(raw))?.name || raw
+    }
+    if(key === 'collection_code'){
+      const found = (collectionCodes || []).find(c => String(c.column_name) === raw || String(c.code) === raw)
+      if(!found) return ''
+      return [found.custom_collection_name, found.code, found.column_name].filter(Boolean).join(' | ')
+    }
+    if(key === 's2'){
+      return formatDateDisplay(raw)
+    }
+    if(isCollectionReferenceIdField(col)){
+      const match = findMemberByCollectionFieldValue(col, raw)
+      return memberTranslationSummary(match)
+    }
+    if(key === 'member_id'){
+      const match = findMemberByCollectionFieldValue(col, raw)
+      return memberTranslationSummary(match)
+    }
+    return ''
+  }
+
+  function collectionFieldIdOptions(col){
+    const source = memberLookupColumnForCollectionField(col)
+    const seen = new Set()
+    return (membersLocal || []).reduce((out, member)=>{
+      const value = member?.[source] ?? member?.[String(source || '').toLowerCase()] ?? member?.MEMBER_ID ?? member?.member_id ?? member?.id
+      if(value === null || value === undefined || String(value).trim() === '') return out
+      const strValue = String(value)
+      if(seen.has(strValue)) return out
+      seen.add(strValue)
+      const name = String(member?.MEMBER_NAME || member?.member_name || '').trim()
+      out.push({
+        value: strValue,
+        label: name ? `${strValue} - ${name}` : strValue,
+      })
+      return out
+    }, [])
+  }
+
   function getDefaultMcFetchLimit(targetPage = mcPage, targetPageSize = mcPageSize){
     const pageNum = Math.max(1, Number(targetPage) || 1)
     const pageSizeNum = Math.max(1, Number(targetPageSize) || 10)
@@ -2733,8 +2851,7 @@ export default function App(){
     if(builderId === 'item_totals' && key === 'local') return 'LOCAL'
     if(builderId === 'item_totals' && key === 'conference') return 'CONFERENCE'
     if(builderId === 'item_totals' && key === 'total') return 'TOTAL'
-    if(builderId === 'contributor_totals' && key === 'date') return 'Date'
-    if(builderId === 'contributor_totals' && key === 'row_total') return 'Total'
+    if(builderId === 'contributor_totals') return String(col || '').toUpperCase()
     return labelForColumn(col)
   }
 
@@ -4114,84 +4231,156 @@ export default function App(){
                 <div style={{fontSize:12,fontWeight:700,marginBottom:8,color:Number(editingCollection?.is_locked || 0)===1 ? '#b45309' : '#166534'}}>
                   Status: {Number(editingCollection?.is_locked || 0)===1 ? 'Locked (requires unlock before save)' : 'Unlocked'}
                 </div>
-                <div className='form-row'>
-                  { (membersCollectionsFields.length? membersCollectionsFields.slice(0,12) : ['collection_code','member_id','church','s1','s2','s3','s4','s5']).map(k=>{
-                    if(k==='id' || k==='added_at') return null
-                    const val = editingCollection[k]===null||editingCollection[k]===undefined? '': editingCollection[k]
-                    if(k==='s2'){
-                      const v = val? new Date(val).toISOString().slice(0,10) : ''
-                      return <input key={k} type='date' value={v} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))} />
-                    }
-                    if(k==='church'){
-                      return (
-                        <div key={k} style={{display:'flex',flexDirection:'column'}}>
-                          <select value={val||''} onChange={e=>{
-                            const newChurch = e.target.value || null
-                            if(!canAccessChurch(newChurch)){ denyRestrictedChurchAccess('members_collection data'); return }
-                            setEditingCollection(prev=>{
-                              const next = {...prev, [k]: newChurch}
-                              try{
-                                const s2 = next.s2 ? new Date(next.s2) : (next.s2===undefined? null : new Date(next.s2))
-                                const s3 = next.s3!=null? Number(next.s3) : null
-                                const churchId = newChurch || next.church || null
-                                if(s2 && s3!=null && churchId){
-                                  const ymd = s2.toISOString().slice(0,10).replace(/-/g,'')
-                                  const cidn = String(Number(churchId)).padStart(3,'0')
-                                  const s3n = String(Number(s3)).padStart(3,'0')
-                                  next.s1 = `${ymd}${cidn}${s3n}`
-                                }
-                              }catch(e){}
-                              return next
-                            })
-                          }}>
-                            <option value=''>-- church --</option>
-                            {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
-                          </select>
-                          <div style={{fontSize:12,color:'#666'}}>{editingCollection && editingCollection.__verified? 'Name verified in members':'Not verified'}</div>
-                        </div>
-                      )
-                    }
-                    if(k==='s4'){
-                      return (
-                        <div key={k} style={{display:'flex',flexDirection:'column'}}>
-                          <input placeholder={k} value={val||''} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))} />
-                          <div style={{marginTop:6}}>
-                            <button onClick={async ()=>{
-                              try{
-                                const nm = editingCollection.s4 || ''
-                                if(!nm) return setStatus('No name to search')
-                                const res = await fetch(`http://localhost:8000/members?q=${encodeURIComponent(nm)}`)
-                                const cand = await res.json()
-                                const scored = (Array.isArray(cand)? cand: []).map(c=> ({...c, _score: levenshtein(nm, c.MEMBER_NAME || '')})).sort((a,b)=> a._score - b._score).slice(0,6)
-                                setEditingCollection(prev=>({...prev, __suggestions: scored, __verified: scored.length>0 && scored[0]._score <= Math.max(2, Math.floor((nm.length||1)*0.25)) }))
-                              }catch(e){ setStatus('Suggestion lookup failed: '+e.message) }
-                            }}>Find suggestions</button>
-                          </div>
-                          {editingCollection.__suggestions && editingCollection.__suggestions.length>0 && (
-                            <div style={{marginTop:6}}>
-                              <div style={{fontSize:12,color:'#333'}}>Suggestions:</div>
-                              {editingCollection.__suggestions.map(s=> (
-                                <div key={s.id} style={{display:'flex',gap:8,alignItems:'center'}}>
-                                  <div style={{flex:1}}>{s.MEMBER_NAME} (ID: {s.MEMBER_ID || s.id})</div>
-                                  <button onClick={()=>{
-                                    // map suggestion to this collection row: set member_id and name
-                                    setEditingCollection(prev=>({...prev, member_id: s.MEMBER_ID || s.id, s4: s.MEMBER_NAME, __verified: true}))
-                                  }}>Map</button>
+                {(() => {
+                  const editFields = (membersCollectionsFields.length
+                    ? membersCollectionsFields
+                    : ['id','collection_code','member_id','church','s1','s2','s3','s4','s5']
+                  ).filter(k => k !== 'added_at' && k !== 'verified' && !String(k).startsWith('__'))
+
+                  const updateCollectionField = (field, nextValue)=>{
+                    setEditingCollection(prev => {
+                      const next = {...prev, [field]: nextValue}
+                      if(field === 'church'){
+                        try{
+                          const s2 = next.s2 ? new Date(next.s2) : null
+                          const s3 = next.s3 != null && String(next.s3).trim() !== '' ? Number(next.s3) : null
+                          const churchId = nextValue || next.church || null
+                          if(s2 && !Number.isNaN(s2.getTime()) && s3 != null && !Number.isNaN(s3) && churchId){
+                            const ymd = s2.toISOString().slice(0,10).replace(/-/g,'')
+                            const cidn = String(Number(churchId)).padStart(3,'0')
+                            const s3n = String(Number(s3)).padStart(3,'0')
+                            next.s1 = `${ymd}${cidn}${s3n}`
+                          }
+                        }catch(e){}
+                      }
+                      if(field === 'member_id'){
+                        const matched = findMemberByCollectionFieldValue(field, nextValue)
+                        if(matched){
+                          const memberName = matched.MEMBER_NAME || matched.member_name
+                          if(memberName) next.s4 = memberName
+                          next.__verified = true
+                        }
+                      }
+                      return next
+                    })
+                  }
+
+                  return (
+                    <div style={mainGridWrapStyle(420)}>
+                      <table style={{...mainGridTableStyle(true), minWidth: 920}}>
+                        <thead>
+                          <tr>
+                            <th style={{width:70}}>NO.</th>
+                            <th style={{width:'28%'}}>ITEM</th>
+                            <th style={{width:'40%'}}>VALUE (EDIT)</th>
+                            <th style={{width:'32%'}}>TRANSLATED VALUE</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {editFields.map((k, idx)=>{
+                            const keyName = normalizeCollectionFieldKey(k)
+                            const currentValue = editingCollection[k] === null || editingCollection[k] === undefined ? '' : String(editingCollection[k])
+                            const isReadOnly = keyName === 'id' || keyName === 's1'
+                            const isReferenceId = isCollectionReferenceIdField(k)
+                            const idOptions = isReferenceId ? collectionFieldIdOptions(k) : []
+                            const translation = collectionFieldTranslation(k, editingCollection[k])
+
+                            let editor = null
+                            if(isReadOnly){
+                              editor = <div style={{fontWeight:700, color:'#0f172a'}}>{currentValue || '-'}</div>
+                            }else if(keyName === 's2'){
+                              const dateValue = currentValue ? new Date(currentValue).toISOString().slice(0,10) : ''
+                              editor = (
+                                <input
+                                  type='date'
+                                  value={dateValue}
+                                  onChange={e=> updateCollectionField(k, e.target.value)}
+                                  style={{width:'100%'}}
+                                />
+                              )
+                            }else if(keyName === 'church'){
+                              editor = (
+                                <select
+                                  value={currentValue || ''}
+                                  onChange={e=>{
+                                    const newChurch = e.target.value || null
+                                    if(!canAccessChurch(newChurch)){ denyRestrictedChurchAccess('members_collection data'); return }
+                                    updateCollectionField(k, newChurch)
+                                  }}
+                                  style={{width:'100%'}}
+                                >
+                                  <option value=''>-- church --</option>
+                                  {churches.map(c=> <option key={c.id} value={c.id} disabled={!canAccessChurch(c.id)}>{c.name}</option>)}
+                                </select>
+                              )
+                            }else if(isReferenceId){
+                              editor = (
+                                <div style={{display:'grid', gap:6}}>
+                                  <div style={{fontWeight:700, color:'#0f172a'}}>{currentValue || '-'}</div>
+                                  <select
+                                    value={currentValue}
+                                    onChange={e=> updateCollectionField(k, e.target.value)}
+                                    style={{width:'100%'}}
+                                  >
+                                    <option value=''>-- select {labelForColumn(k)} --</option>
+                                    {idOptions.map(opt=> (
+                                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                  </select>
                                 </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    }
-                    return <input key={k} placeholder={k} value={val||''} onChange={e=> setEditingCollection(prev=>({...prev, [k]: e.target.value}))} />
-                  })}
-                </div>
+                              )
+                            }else if(keyName === 's4'){
+                              editor = (
+                                <input
+                                  list='edit-collection-member-name-list'
+                                  value={currentValue}
+                                  onChange={e=> updateCollectionField(k, e.target.value)}
+                                  placeholder='Type or select member name'
+                                  style={{width:'100%'}}
+                                />
+                              )
+                            }else{
+                              editor = (
+                                <input
+                                  value={currentValue}
+                                  onChange={e=> updateCollectionField(k, e.target.value)}
+                                  placeholder={labelForColumn(k)}
+                                  style={{width:'100%'}}
+                                />
+                              )
+                            }
+
+                            return (
+                              <tr key={k}>
+                                <td style={{fontWeight:700}}>{idx + 1}</td>
+                                <td style={{fontWeight:700, color:'#0f172a'}}>{labelForColumn(k)}</td>
+                                <td>{editor}</td>
+                                <td style={{color:'#334155', fontWeight:600}}>{translation || '-'}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                      <datalist id='edit-collection-member-name-list'>
+                        {(membersLocal || []).map(m => {
+                          const nm = String(m?.MEMBER_NAME || '').trim()
+                          if(!nm) return null
+                          return <option key={`${m.id || nm}-${nm}`} value={nm} />
+                        })}
+                      </datalist>
+                    </div>
+                  )
+                })()}
                 <div style={{marginTop:8}}>
                   <button onClick={async ()=>{
                     try{
                       const id = editingCollection.id
-                      const payload = {...editingCollection}; delete payload.id
+                      const payload = {...editingCollection}
+                      delete payload.id
+                      delete payload.verified
+                      Object.keys(payload).forEach(key => {
+                        if(String(key).startsWith('__')) delete payload[key]
+                      })
                       const res = await authFetch(`http://localhost:8000/members_collection/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
                       const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data))
                       setStatus('Saved')
