@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import * as XLSX from 'xlsx'
 import './styles.css'
 
 const LOCAL_API_BASE = 'http://localhost:8000'
@@ -1866,6 +1865,25 @@ export default function App(){
     return new Intl.NumberFormat().format(Number(value))
   }
 
+  function csvCell(value){
+    const text = value === null || value === undefined ? '' : String(value)
+    const escaped = text.replace(/"/g, '""')
+    return `"${escaped}"`
+  }
+
+  function downloadCsv(filename, rows){
+    const csv = rows.map(row => row.map(csvCell).join(',')).join('\r\n')
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   function currentChurchName(){
     if(!currentUserChurchId) return 'Local Church'
     const found = (churches || []).find(c => Number(c?.id) === Number(currentUserChurchId))
@@ -1895,7 +1913,7 @@ export default function App(){
       const localHeader = churchLabel
       const periodText = periodSummaryPeriodText()
 
-      const aoa = [
+      const rows = [
         ['Period Summary Report'],
         [`Church: ${churchLabel}`],
         [`Period: ${periodText}`],
@@ -1904,7 +1922,7 @@ export default function App(){
       ]
 
       periodSummaryRows.forEach((row)=>{
-        aoa.push([
+        rows.push([
           String(row?.item || ''),
           Number(row?.conference || 0),
           Number(row?.local || 0),
@@ -1912,26 +1930,17 @@ export default function App(){
         ])
       })
 
-      aoa.push([
+      rows.push([
         'TOTAL',
         Number(periodSummaryTotals?.conference || 0),
         Number(periodSummaryTotals?.local || 0),
         Number(periodSummaryTotals?.total || 0),
       ])
 
-      const wb = XLSX.utils.book_new()
-      const ws = XLSX.utils.aoa_to_sheet(aoa)
-      ws['!cols'] = [
-        { wch: 40 },
-        { wch: 18 },
-        { wch: 24 },
-        { wch: 18 },
-      ]
-      XLSX.utils.book_append_sheet(wb, ws, 'Period Summary')
-      XLSX.writeFile(wb, `period_summary_${periodSummaryFileStamp()}.xlsx`)
-      setStatus('Period summary exported to Excel.')
+      downloadCsv(`period_summary_${periodSummaryFileStamp()}.csv`, rows)
+      setStatus('Period summary exported to CSV.')
     }catch(e){
-      setStatus('Excel export failed: ' + (e?.message || String(e)))
+      setStatus('CSV export failed: ' + (e?.message || String(e)))
     }
   }
 
@@ -2023,7 +2032,7 @@ export default function App(){
       const dataset = currentBuiltReportDataset()
       if(!dataset){ setStatus('Build a report first before export.'); return }
       const prettyCols = dataset.columns.map(c=>labelForColumn(c))
-      const aoa = [
+      const rows = [
         [dataset.title],
         [`Church: ${currentChurchName()}`],
         [`Period: ${reportFrom || 'All'} to ${reportTo || 'All'}`],
@@ -2031,17 +2040,13 @@ export default function App(){
         prettyCols,
       ]
       dataset.rows.forEach(row=>{
-        aoa.push(dataset.columns.map(col=> row?.[col] ?? ''))
+        rows.push(dataset.columns.map(col=> row?.[col] ?? ''))
       })
-      const wb = XLSX.utils.book_new()
-      const ws = XLSX.utils.aoa_to_sheet(aoa)
-      ws['!cols'] = dataset.columns.map((col, idx)=> ({ wch: idx === 0 ? 30 : 18 }))
-      XLSX.utils.book_append_sheet(wb, ws, 'Report')
       const stamp = `${(reportFrom || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}_${(reportTo || 'all').replace(/[^0-9A-Za-z_-]/g, '_')}`
-      XLSX.writeFile(wb, `report_builder_${stamp}.xlsx`)
-      setStatus('Built report exported to Excel.')
+      downloadCsv(`report_builder_${stamp}.csv`, rows)
+      setStatus('Built report exported to CSV.')
     }catch(e){
-      setStatus('Built report Excel export failed: ' + (e?.message || String(e)))
+      setStatus('Built report CSV export failed: ' + (e?.message || String(e)))
     }
   }
 
@@ -3462,7 +3467,7 @@ export default function App(){
                 <input type='date' value={periodSummaryTo} onChange={e=>setPeriodSummaryTo(e.target.value)} />
                 <button type='button' onClick={fetchPeriodSummary} disabled={periodSummaryLoading}>{periodSummaryLoading ? 'Loading...' : 'Generate Summary'}</button>
                 <button type='button' onClick={exportPeriodSummaryPdf} disabled={periodSummaryLoading || periodSummaryRows.length === 0}>Export PDF</button>
-                <button type='button' onClick={exportPeriodSummaryExcel} disabled={periodSummaryLoading || periodSummaryRows.length === 0}>Export Excel</button>
+                <button type='button' onClick={exportPeriodSummaryExcel} disabled={periodSummaryLoading || periodSummaryRows.length === 0}>Export CSV</button>
               </div>
 
               {periodSummaryRows.length > 0 && (
@@ -3548,7 +3553,7 @@ export default function App(){
                 <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
                   <button type='button' onClick={buildSelectedReport}>Build Selected Report</button>
                   <button type='button' onClick={exportBuiltReportPdf}>Export Built PDF</button>
-                  <button type='button' onClick={exportBuiltReportExcel}>Export Built Excel</button>
+                  <button type='button' onClick={exportBuiltReportExcel}>Export Built CSV</button>
                   <span style={{fontSize:12, color:'#64748b'}}>Selected: {reportBuilderOptions.find(r=> r.id===selectedReportBuilder)?.title}</span>
                 </div>
               </div>

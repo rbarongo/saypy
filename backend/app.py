@@ -453,6 +453,10 @@ def _serializable_value(v):
     try:
         if v is None:
             return None
+        if isinstance(v, dict):
+            return {str(k): _serializable_value(val) for k, val in v.items()}
+        if isinstance(v, (list, tuple, set)):
+            return [_serializable_value(item) for item in v]
         # normalize NaN/Inf floats
         if isinstance(v, float):
             if math.isnan(v) or math.isinf(v):
@@ -476,7 +480,7 @@ def _serializable_value(v):
             return float(v)
         if isinstance(v, np.generic):
             try:
-                return v.item()
+                return _serializable_value(v.item())
             except Exception:
                 return float(v)
         # basic python types are fine
@@ -2201,11 +2205,12 @@ def report_period_summary(
     )
     actor_church = _auth_context_church(auth)
     try:
-        return compute_period_summary(
+        result = compute_period_summary(
             actor_church=actor_church,
             start_date=start_date,
             end_date=end_date,
         )
+        return _serializable_value(result)
     except HTTPException:
         raise
     except Exception as e:
