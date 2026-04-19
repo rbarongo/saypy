@@ -862,6 +862,7 @@ export default function App(){
       s3: 'Serial',
       s4: 'Name',
       collection_entry_method: 'Collection Entry Method',
+      entry_method: 'Entry Method',
     }[col];
     return human || col;
   }
@@ -1635,6 +1636,10 @@ export default function App(){
       const itemLabel = labelForCollectionCode(itemCode)
       const amount = inferRowAmount(row)
       const category = categorizeContribution(itemLabel)
+      const methodRaw = String(row?.collection_entry_method || '').trim().toLowerCase()
+      const entryMethod = methodRaw === 'form_entry' || methodRaw === 'form'
+        ? 'form entry'
+        : (methodRaw === 'import' ? 'import' : '')
       return {
         index: idx + 1,
         date: normalizeDateText(row?.s2),
@@ -1644,6 +1649,7 @@ export default function App(){
         item_name: itemLabel,
         category,
         amount,
+        entry_method: entryMethod,
       }
     }).filter(entry=> entry.amount !== 0)
   }
@@ -1658,6 +1664,27 @@ export default function App(){
       grouped[key].count += 1
     })
     return grouped
+  }
+
+  function appendGroupedTotalsRow(rows, keyName, totalLabel = 'TOTAL'){
+    const base = Array.isArray(rows) ? rows : []
+    if(!base.length) return base
+    const totals = base.reduce((acc, row)=> ({
+      entries: acc.entries + safeNumber(row.entries),
+      local: acc.local + safeNumber(row.local),
+      conference: acc.conference + safeNumber(row.conference),
+      total: acc.total + safeNumber(row.total),
+    }), { entries: 0, local: 0, conference: 0, total: 0 })
+    return [
+      ...base,
+      {
+        [keyName]: totalLabel,
+        entries: totals.entries,
+        local: totals.local,
+        conference: totals.conference,
+        total: totals.total,
+      },
+    ]
   }
 
   async function fetchPeriodSummary(){
@@ -1843,7 +1870,8 @@ export default function App(){
     }
   }
 
-  function buildSelectedReport(){    const entries = buildReportEntries()
+  function buildSelectedReport(){
+    const entries = buildReportEntries()
     if(!entries.length){
       setBuiltReportRows([])
       setBuiltReportColumns([])
@@ -1854,34 +1882,49 @@ export default function App(){
     }
 
     if(selectedReportBuilder === 'details'){
-      setBuiltReportColumns(['date', 'receipt_no', 'contributor', 'item_name', 'category', 'amount'])
-      setBuiltReportRows(entries.map(e=>(
-        {
-          date: e.date,
-          receipt_no: e.receipt_no,
-          contributor: e.contributor,
-          item_name: e.item_name,
-          category: e.category,
-          amount: e.amount,
-        }
-      )))
+      const out = [...entries]
+        .sort((a, b)=>{
+          const ad = a.date || '9999-12-31'
+          const bd = b.date || '9999-12-31'
+          if(ad !== bd) return ad.localeCompare(bd)
+          return String(a.receipt_no || '').localeCompare(String(b.receipt_no || ''))
+        })
+        .map(e=>(
+          {
+            date: e.date,
+            receipt_no: e.receipt_no,
+            contributor: e.contributor,
+            item_name: e.item_name,
+            category: e.category,
+            amount: e.amount,
+            entry_method: e.entry_method,
+          }
+        ))
+      setBuiltReportColumns(['date', 'receipt_no', 'contributor', 'item_name', 'category', 'amount', 'entry_method'])
+      setBuiltReportRows(out)
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
-      setStatus('Detailed entries report built successfully.')
+      setStatus(`Detailed entries report built successfully (${out.length} rows).`)
       return
     }
 
     if(selectedReportBuilder === 'daily_totals'){
       const grouped = groupAndSum(entries, e=> e.date || 'Unknown date')
-      const out = Object.keys(grouped).sort().map(date=> ({
+      const orderedKeys = Object.keys(grouped).sort((a, b)=>{
+        if(a === 'Unknown date' && b !== 'Unknown date') return 1
+        if(b === 'Unknown date' && a !== 'Unknown date') return -1
+        return String(a).localeCompare(String(b))
+      })
+      const out = orderedKeys.map(date=> ({
         date,
         local: grouped[date].local,
         conference: grouped[date].conference,
         total: grouped[date].total,
         entries: grouped[date].count,
       }))
+      const outWithTotal = appendGroupedTotalsRow(out, 'date')
       setBuiltReportColumns(['date', 'entries', 'local', 'conference', 'total'])
-      setBuiltReportRows(out)
+      setBuiltReportRows(outWithTotal)
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus('Daily totals report built successfully.')
@@ -1890,15 +1933,20 @@ export default function App(){
 
     if(selectedReportBuilder === 'item_totals'){
       const grouped = groupAndSum(entries, e=> e.item_name || 'Unknown item')
-      const out = Object.keys(grouped).sort().map(item=> ({
+      const out = Object.keys(grouped).map(item=> ({
         item,
         local: grouped[item].local,
         conference: grouped[item].conference,
         total: grouped[item].total,
         entries: grouped[item].count,
-      }))
+      })).sort((a, b)=>{
+        const diff = safeNumber(b.total) - safeNumber(a.total)
+        if(diff !== 0) return diff
+        return String(a.item || '').localeCompare(String(b.item || ''))
+      })
+      const outWithTotal = appendGroupedTotalsRow(out, 'item')
       setBuiltReportColumns(['item', 'entries', 'local', 'conference', 'total'])
-      setBuiltReportRows(out)
+      setBuiltReportRows(outWithTotal)
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus('Collection item totals report built successfully.')
@@ -1906,16 +1954,26 @@ export default function App(){
     }
 
     if(selectedReportBuilder === 'contributor_totals'){
-      const grouped = groupAndSum(entries, e=> e.contributor || 'Unknown contributor')
-      const out = Object.keys(grouped).sort().map(contributor=> ({
-        contributor,
-        local: grouped[contributor].local,
-        conference: grouped[contributor].conference,
-        total: grouped[contributor].total,
-        entries: grouped[contributor].count,
-      }))
+      const grouped = {}
+      entries.forEach((entry)=>{
+        const rawContributor = String(entry?.contributor || '').trim()
+        const label = rawContributor || 'Unknown contributor'
+        const key = label.toLowerCase()
+        if(!grouped[key]){
+          grouped[key] = { contributor: label, local: 0, conference: 0, total: 0, entries: 0 }
+        }
+        grouped[key][entry.category] += safeNumber(entry.amount)
+        grouped[key].total += safeNumber(entry.amount)
+        grouped[key].entries += 1
+      })
+      const out = Object.values(grouped).sort((a, b)=>{
+        const diff = safeNumber(b.total) - safeNumber(a.total)
+        if(diff !== 0) return diff
+        return String(a.contributor || '').localeCompare(String(b.contributor || ''))
+      })
+      const outWithTotal = appendGroupedTotalsRow(out, 'contributor')
       setBuiltReportColumns(['contributor', 'entries', 'local', 'conference', 'total'])
-      setBuiltReportRows(out)
+      setBuiltReportRows(outWithTotal)
       setMeetingSummaryRows([])
       setMeetingSummaryTotals({local: 0, conference: 0, total: 0})
       setStatus('Contributor totals report built successfully.')
