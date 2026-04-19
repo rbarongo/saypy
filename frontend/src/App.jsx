@@ -659,6 +659,21 @@ export default function App(){
       }
     }catch(e){ setStatus('Failed to load members: '+e.message) }
   }
+
+  function nextMemberNumericValue(candidateKeys, fallbackStart = 1){
+    const nums = (members || [])
+      .map((m)=> {
+        for(const k of candidateKeys){
+          const raw = m?.[k]
+          const n = Number(raw)
+          if(Number.isFinite(n) && n > 0) return n
+        }
+        return null
+      })
+      .filter((n)=> n !== null)
+    if(!nums.length) return fallbackStart
+    return Math.max(...nums) + 1
+  }
   async function updateMember(id, payload){
     try{
       const res = await fetch(`http://localhost:8000/members/${id}`, { method:'PUT', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(payload) })
@@ -3606,7 +3621,7 @@ export default function App(){
                 <h4>{editingMember? 'Edit Member' : 'New Member'}</h4>
                 <div style={{display:'grid',gridTemplateColumns:'minmax(180px, 260px) minmax(240px, 1fr)',gap:'10px 12px',alignItems:'center'}}>
                   {(membersFields && membersFields.length? membersFields : Object.keys(memberForm||{})).map(key=>{
-                    if(key==='id' || key==='created_at') return null
+                    if(['id','created_at','church','MEMBER_ID','member_id'].includes(key)) return null
                     const val = memberForm[key]===undefined? '': memberForm[key]
                     let control = null
                     if(key==='STATUS'){
@@ -3691,7 +3706,15 @@ export default function App(){
                         const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data));
                         setStatus('Member updated');
                       }else{
-                        const res = await authFetch('http://localhost:8000/members',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(memberForm)});
+                        const createPayload = {...memberForm}
+                        const memberIdRaw = createPayload.MEMBER_ID ?? createPayload.member_id
+                        if(memberIdRaw === undefined || memberIdRaw === null || String(memberIdRaw).trim() === ''){
+                          createPayload.MEMBER_ID = nextMemberNumericValue(['MEMBER_ID', 'member_id'], 1)
+                        }
+                        if(createPayload.sno === undefined || createPayload.sno === null || String(createPayload.sno).trim() === ''){
+                          createPayload.sno = nextMemberNumericValue(['sno'], 1)
+                        }
+                        const res = await authFetch('http://localhost:8000/members',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(createPayload)});
                         const data = await res.json(); if(!res.ok) throw new Error(data.detail||JSON.stringify(data));
                         setStatus('Member created');
                       }
