@@ -24,6 +24,58 @@ if(typeof window !== 'undefined' && !window.__saypyFetchPatched){
   window.__saypyFetchPatched = true
 }
 
+if(typeof window !== 'undefined' && !window.__saypyDatePickerIconClickPatched){
+  document.addEventListener('pointerdown', (event)=>{
+    const target = event.target
+    if(!(target instanceof HTMLInputElement)) return
+    if(target.type !== 'date' || target.disabled || target.readOnly) return
+    const rect = target.getBoundingClientRect()
+    const clickX = event.clientX - rect.left
+    const iconHitZoneStart = rect.width - 40
+    if(clickX < iconHitZoneStart) return
+    if(typeof target.showPicker === 'function'){
+      try{ target.showPicker() }catch(e){}
+    }
+  })
+  window.__saypyDatePickerIconClickPatched = true
+}
+
+if(typeof window !== 'undefined' && !window.__saypyDatePickerTonePatched){
+  const DATE_INPUT_LIGHT_CLASS = 'date-input-on-light'
+  const DATE_INPUT_DARK_CLASS = 'date-input-on-dark'
+
+  const classifyDateInputTone = (el)=>{
+    if(!(el instanceof HTMLInputElement) || el.type !== 'date') return
+    const style = window.getComputedStyle(el)
+    const bg = String(style.backgroundColor || '')
+    const parts = bg.match(/[\d.]+/g)
+    if(!parts || parts.length < 3) return
+    const r = Number(parts[0])
+    const g = Number(parts[1])
+    const b = Number(parts[2])
+    const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+    const isLight = Number.isFinite(luminance) && luminance >= 0.6
+    el.classList.remove(DATE_INPUT_LIGHT_CLASS, DATE_INPUT_DARK_CLASS)
+    el.classList.add(isLight ? DATE_INPUT_LIGHT_CLASS : DATE_INPUT_DARK_CLASS)
+  }
+
+  const classifyAllDateInputs = ()=>{
+    document.querySelectorAll('input[type="date"]').forEach(classifyDateInputTone)
+  }
+
+  document.addEventListener('focusin', (event)=>{
+    const target = event.target
+    if(target instanceof HTMLInputElement && target.type === 'date'){
+      classifyDateInputTone(target)
+    }
+  })
+
+  window.addEventListener('resize', classifyAllDateInputs)
+  window.addEventListener('load', classifyAllDateInputs)
+  setTimeout(classifyAllDateInputs, 0)
+  window.__saypyDatePickerTonePatched = true
+}
+
 // Single-file frontend with Login, RBAC, and pages for Admin/Members/Collections/Reports
 export default function App(){
   const [page, setPage] = useState('dashboard') // default landing
