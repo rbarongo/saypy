@@ -1822,27 +1822,61 @@ export default function App(){
 
   function buildReportEntries(){
     const rows = Array.isArray(reportRows) ? reportRows : []
-    return rows.map((row, idx)=>{
-      const itemCode = String(row?.collection_code || '')
-      const itemLabel = labelForCollectionCode(itemCode)
-      const amount = inferRowAmount(row)
-      const category = categorizeContribution(itemLabel)
+    const defs = getScopedCollectionCodeDefs()
+    const out = []
+
+    rows.forEach((row, idx)=>{
       const methodRaw = String(row?.collection_entry_method || '').trim().toLowerCase()
       const entryMethod = methodRaw === 'form_entry' || methodRaw === 'form'
         ? 'form entry'
         : (methodRaw === 'import' ? 'import' : '')
-      return {
+
+      const common = {
         index: idx + 1,
         date: normalizeDateText(row?.s2),
         receipt_no: String(row?.s1 || ''),
         contributor: String(row?.s4 || ''),
-        item_code: itemCode,
-        item_name: itemLabel,
-        category,
-        amount,
         entry_method: entryMethod,
       }
-    }).filter(entry=> entry.amount !== 0)
+
+      let addedFromCodes = false
+      defs.forEach((def)=>{
+        const col = String(def?.column_name || '').trim()
+        if(!col) return
+        const amount = safeNumber(row?.[col])
+        if(amount === 0) return
+        addedFromCodes = true
+        const itemLabel = String(def?.custom_collection_name || def?.code || def?.column_name || col)
+        const category = categorizeContribution(itemLabel)
+        out.push({
+          ...common,
+          item_code: col,
+          item_name: itemLabel,
+          category,
+          amount,
+        })
+      })
+
+      // Fallback for data shapes where a single value is provided outside code columns.
+      if(!addedFromCodes){
+        const itemCodeRaw = String(row?.collection_code || '').trim()
+        const itemCode = itemCodeRaw.toLowerCase() === 'import' ? '' : itemCodeRaw
+        const amount = inferRowAmount(row)
+        if(amount !== 0){
+          const itemLabel = itemCode ? labelForCollectionCode(itemCode) : 'Unknown'
+          const category = categorizeContribution(itemLabel)
+          out.push({
+            ...common,
+            item_code: itemCode,
+            item_name: itemLabel,
+            category,
+            amount,
+          })
+        }
+      }
+    })
+
+    return out.filter(entry=> entry.amount !== 0)
   }
 
   function groupAndSum(entries, keyBuilder){
