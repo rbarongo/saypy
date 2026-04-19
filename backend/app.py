@@ -1053,7 +1053,7 @@ def bulk_insert_members_collections(rows: List[dict], auth: dict = Depends(requi
             row['church'] = uploader.get('church')
         row['church'] = _enforce_church_scope(row.get('church'), actor_church, context='bulk members_collection insert')
 
-        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'collection_entry_method', 'notes'):
+        for sk in ('s4', 'phone', 's10', 's11', 's12', 'source', 'collection_code', 'collection_entry_method', 'notes'):
             if row.get(sk) is not None and not isinstance(row.get(sk), str):
                 row[sk] = str(row.get(sk))
 
@@ -1150,6 +1150,7 @@ class MembersCollectionRow(BaseModel):
     s2: datetime
     s3: Optional[int] = None
     s4: str
+    phone: Optional[str] = None
     # optional monetary/other fields
     s5: Optional[float] = None
     s6: Optional[float] = None
@@ -1244,7 +1245,7 @@ def validate_members_collections(rows: List[dict], auth: dict = Depends(require_
             row['church'] = uploader.get('church')
         row['church'] = _enforce_church_scope(row.get('church'), actor_church, context='validation request')
 
-        for sk in ('s4', 's10', 's11', 's12', 'source', 'collection_code', 'collection_entry_method', 'notes'):
+        for sk in ('s4', 'phone', 's10', 's11', 's12', 'source', 'collection_code', 'collection_entry_method', 'notes'):
             if row.get(sk) is not None and not isinstance(row.get(sk), str):
                 row[sk] = str(row.get(sk))
 
@@ -2118,6 +2119,8 @@ def report_members_collections(
     s1: Optional[str] = None,
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
+    verified: Optional[bool] = None,
+    phone: Optional[str] = None,
     limit: Optional[int] = None,
     auth: dict = Depends(require_api_key_or_user),
 ):
@@ -2144,6 +2147,7 @@ def report_members_collections(
         collection_code = str(collection_code or '').strip()
         member_id = str(member_id or '').strip()
         member_name = str(member_name or '').strip()
+        phone = str(phone or '').strip()
         s1 = str(s1 or '').strip()
         has_active_filters = any([
             start_date,
@@ -2152,9 +2156,11 @@ def report_members_collections(
             collection_code,
             member_id,
             member_name,
+            phone,
             s1,
             amount_min is not None,
             amount_max is not None,
+            verified is not None,
         ])
 
         if collection_code and 'collection_code' in df.columns:
@@ -2166,8 +2172,19 @@ def report_members_collections(
         if member_name and 's4' in df.columns:
             df = df[df['s4'].astype(str).str.lower().str.contains(member_name.lower(), na=False)]
 
+        if phone and 'phone' in df.columns:
+            df = df[df['phone'].astype(str).str.lower().str.contains(phone.lower(), na=False)]
+
         if s1 and 's1' in df.columns:
             df = df[df['s1'].astype(str).str.lower().str.contains(s1.lower(), na=False)]
+
+        if verified is not None and 'member_id' in df.columns:
+            member_series = df['member_id']
+            member_text = member_series.astype(str).str.strip()
+            if verified:
+                df = df[member_series.notna() & (member_text != '')]
+            else:
+                df = df[member_series.isna() | (member_text == '')]
 
         if amount_min is not None and 's5' in df.columns:
             amt = pd.to_numeric(df['s5'], errors='coerce')

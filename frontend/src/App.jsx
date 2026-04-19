@@ -714,6 +714,8 @@ export default function App(){
   const [mcFilterCode, setMcFilterCode] = useState('')
   const [mcFilterMemberId, setMcFilterMemberId] = useState('')
   const [mcFilterMemberName, setMcFilterMemberName] = useState('')
+  const [mcFilterPhone, setMcFilterPhone] = useState('')
+  const [mcFilterVerified, setMcFilterVerified] = useState('')
   const [mcFilterS1, setMcFilterS1] = useState('')
   const [mcFilterAmountMin, setMcFilterAmountMin] = useState('')
   const [mcFilterAmountMax, setMcFilterAmountMax] = useState('')
@@ -725,6 +727,8 @@ export default function App(){
     code: '',
     memberId: '',
     memberName: '',
+    phone: '',
+    verified: '',
     s1: '',
     amountMin: '',
     amountMax: '',
@@ -743,6 +747,10 @@ export default function App(){
   const [mcPickerRight, setMcPickerRight] = useState([])
   const [mcPickerLeftSelected, setMcPickerLeftSelected] = useState(new Set())
   const [mcPickerRightSelected, setMcPickerRightSelected] = useState(new Set())
+  const [showVerifyMapping, setShowVerifyMapping] = useState(false)
+  const [verifyMappingRows, setVerifyMappingRows] = useState([])
+  const [verifySavingRowId, setVerifySavingRowId] = useState(null)
+  const [verifySavingAll, setVerifySavingAll] = useState(false)
   const [deleteRequests, setDeleteRequests] = useState([])
   const [deleteRequestsLoading, setDeleteRequestsLoading] = useState(false)
   const [deleteRequestStatusFilter, setDeleteRequestStatusFilter] = useState('pending')
@@ -1101,6 +1109,8 @@ export default function App(){
       if(active.collectionCode) params.set('collection_code', String(active.collectionCode))
       if(active.memberId) params.set('member_id', String(active.memberId))
       if(active.memberName) params.set('member_name', String(active.memberName))
+      if(active.phone) params.set('phone', String(active.phone))
+      if(active.verified !== '' && active.verified != null) params.set('verified', String(active.verified))
       if(active.s1) params.set('s1', String(active.s1))
       if(active.from) params.set('start_date', String(active.from))
       if(active.to) params.set('end_date', String(active.to))
@@ -1122,7 +1132,7 @@ export default function App(){
         return false
       }
       // attach helper metadata per row (verified flag and suggestions)
-      const enriched = (Array.isArray(data)? data : []).map(r=> ({...r, __verified: false, __suggestions: []}))
+      const enriched = (Array.isArray(data)? data : []).map(r=> ({...r, __verified: Number(r?.member_id || 0) > 0, __suggestions: []}))
       setMembersCollections(enriched)
       if(!enriched.length){
         setStatus('No collection rows found')
@@ -1176,6 +1186,8 @@ export default function App(){
       mcApplied.code,
       mcApplied.memberId,
       mcApplied.memberName,
+      mcApplied.phone,
+      mcApplied.verified,
       mcApplied.s1,
       mcApplied.amountMin,
       mcApplied.amountMax,
@@ -1550,24 +1562,159 @@ export default function App(){
     return dp[m][n];
   }
 
-  // Verify names in current membersCollections: fetch /members?q=name and compute fuzzy suggestions
+  function normalizeNameForMatch(name){
+    return String(name || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  }
+
+  function normalizePhoneDigits(phone){
+    return String(phone || '').replace(/\D+/g, '')
+  }
+
+  function memberPrimaryId(member){
+    return Number(member?.MEMBER_ID ?? member?.member_id ?? member?.id ?? 0) || null
+  }
+
+  function buildMemberCandidatesForCollectionRow(row, historicalByName, historicalByPhone){
+    const rowName = normalizeNameForMatch(row?.s4)
+    const rowPhone = normalizePhoneDigits(row?.phone)
+    return (membersLocal || []).map(member => {
+      const memberNameRaw = String(member?.MEMBER_NAME || member?.member_name || '')
+      const memberName = normalizeNameForMatch(memberNameRaw)
+      const memberPhone = normalizePhoneDigits(member?.PHONE || member?.phone)
+      const baseScore = levenshtein(rowName, memberName)
+      let score = baseScore
+
+      if(rowPhone && memberPhone){
+        if(rowPhone === memberPhone) score -= 5
+        else if(rowPhone.endsWith(memberPhone) || memberPhone.endsWith(rowPhone)) score -= 2
+      }
+
+      const primaryId = memberPrimaryId(member)
+      if(primaryId){
+        const byName = historicalByName.get(rowName)
+        const byPhone = rowPhone ? historicalByPhone.get(rowPhone) : null
+        if(byName && Number(byName) === Number(primaryId)) score -= 3
+        if(byPhone && Number(byPhone) === Number(primaryId)) score -= 4
+      }
+
+      return {
+        ...member,
+        _score: score,
+        _rawScore: baseScore,
+        _memberPrimaryId: primaryId,
+      }
+    }).sort((a,b)=> a._score - b._score).slice(0, 8)
+  }
+
+  // Verify names and phones for current filtered rows, then open a mapping workspace.
   async function verifyNames(){
-    if(!Array.isArray(membersCollections) || membersCollections.length===0) return;
+    const sourceRows = getFilteredMembersCollectionsRows()
+    if(!Array.isArray(sourceRows) || sourceRows.length===0) return;
     setStatus('Verifying names...')
-    const updated = [];
-    for(const r of membersCollections){
-      const name = r.s4 || r.s4 || r['s4'] || '';
-      if(!name){ updated.push({...r, __verified:false, __suggestions: []}); continue }
-      try{
-        const res = await authFetch(`http://localhost:8000/members?q=${encodeURIComponent(name)}`)
-        const cand = await res.json();
-        const scored = (Array.isArray(cand)? cand: []).map(c=> ({...c, _score: levenshtein(name, c.MEMBER_NAME || c.MEMBER_NAME || '')})).sort((a,b)=> a._score - b._score).slice(0,6)
-        const verified = scored.length>0 && scored[0]._score <= Math.max(2, Math.floor((name.length||1)*0.25));
-        updated.push({...r, __verified: verified, __suggestions: scored})
-      }catch(e){ updated.push({...r, __verified:false, __suggestions: []}) }
+    const historicalByName = new Map()
+    const historicalByPhone = new Map()
+    ;(membersCollections || []).forEach(r=> {
+      const linkedId = Number(r?.member_id || 0)
+      if(!linkedId) return
+      const keyName = normalizeNameForMatch(r?.s4)
+      const keyPhone = normalizePhoneDigits(r?.phone)
+      if(keyName && !historicalByName.has(keyName)) historicalByName.set(keyName, linkedId)
+      if(keyPhone && !historicalByPhone.has(keyPhone)) historicalByPhone.set(keyPhone, linkedId)
+    })
+
+    const mappingRows = sourceRows.map(r=> {
+      const suggestions = buildMemberCandidatesForCollectionRow(r, historicalByName, historicalByPhone)
+      const top = suggestions[0]
+      const rowName = normalizeNameForMatch(r?.s4)
+      const threshold = Math.max(2, Math.floor((rowName.length || 1) * 0.25))
+      const hasServerLink = Number(r?.member_id || 0) > 0
+      const autoVerified = hasServerLink || (!!top && top._score <= threshold)
+      const autoSelected = hasServerLink
+        ? (suggestions.find(s => Number(s._memberPrimaryId) === Number(r.member_id)) || null)
+        : (autoVerified ? top : null)
+      return {
+        rowId: r.id,
+        row: r,
+        suggestions,
+        selectedMemberId: autoSelected ? Number(autoSelected._memberPrimaryId || autoSelected.id || 0) : null,
+        selectedLabel: autoSelected ? String(autoSelected?.MEMBER_NAME || '') : '',
+        verified: hasServerLink || autoVerified,
+      }
+    })
+
+    setVerifyMappingRows(mappingRows)
+    setShowVerifyMapping(true)
+    setStatus(`Verification complete: ${mappingRows.length} row(s) ready for mapping`)
+  }
+
+  async function saveVerifyMappingForRow(mappingRow){
+    const rowId = Number(mappingRow?.rowId || 0)
+    const selectedId = Number(mappingRow?.selectedMemberId || 0)
+    if(!rowId || !selectedId){
+      setStatus('Select a member before saving mapping')
+      return false
     }
-    setMembersCollections(updated)
-    setStatus('Verification complete')
+    const selected = (membersLocal || []).find(m => Number(memberPrimaryId(m)) === selectedId || Number(m?.id || 0) === selectedId)
+    if(!selected){
+      setStatus('Selected member was not found')
+      return false
+    }
+    const memberIdToSave = Number(memberPrimaryId(selected) || 0)
+    if(!memberIdToSave){
+      setStatus('Selected member has no valid member id')
+      return false
+    }
+    const payload = {
+      member_id: memberIdToSave,
+      s4: selected?.MEMBER_NAME || mappingRow?.row?.s4 || null,
+      phone: mappingRow?.row?.phone || selected?.PHONE || null,
+    }
+    setVerifySavingRowId(rowId)
+    try{
+      const res = await authFetch(`http://localhost:8000/members_collection/${rowId}`, {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(()=> ({}))
+      if(!res.ok) throw new Error(data?.detail || JSON.stringify(data) || 'Save failed')
+
+      setMembersCollections(prev => (prev || []).map(r => Number(r?.id) === rowId
+        ? {
+            ...r,
+            member_id: memberIdToSave,
+            s4: payload.s4,
+            phone: payload.phone,
+            __verified: true,
+          }
+        : r
+      ))
+      setVerifyMappingRows(prev => (prev || []).map(v => v.rowId === rowId ? {...v, verified: true} : v))
+      setStatus(`Saved mapping for collection row ${rowId}`)
+      return true
+    }catch(e){
+      setStatus('Save mapping failed: ' + (e?.message || String(e)))
+      return false
+    }finally{
+      setVerifySavingRowId(null)
+    }
+  }
+
+  async function saveAllVerifyMappings(){
+    if(verifySavingAll) return
+    const candidates = (verifyMappingRows || []).filter(v => Number(v?.selectedMemberId || 0) > 0)
+    if(!candidates.length){
+      setStatus('No selected mappings to save')
+      return
+    }
+    setVerifySavingAll(true)
+    let ok = 0
+    for(const item of candidates){
+      const saved = await saveVerifyMappingForRow(item)
+      if(saved) ok += 1
+    }
+    setVerifySavingAll(false)
+    setStatus(`Saved ${ok}/${candidates.length} mapping(s)`)
   }
 
   function getOrderedCodes(codes){ if(!codes||!codes.length) return []; const filtered = codes.filter(c=> c.code && String(c.code).toUpperCase() !== 'UNUSED'); const priority = ['Sno','Jina','Zaka','Sadaka']; const out=[]; const used=new Set(); priority.forEach(p=>{ const found = filtered.find(c=> String(c.code).toLowerCase()===p.toLowerCase()); if(found){ out.push(found); used.add(found.column_name) } }); const rest = filtered.filter(c=> !used.has(c.column_name)).sort((a,b)=> (a.code||'').toString().localeCompare((b.code||'').toString())); return out.concat(rest) }
@@ -4371,6 +4518,8 @@ export default function App(){
                 collectionCode: mcApplied.code,
                 memberId: mcApplied.memberId,
                 memberName: mcApplied.memberName,
+                phone: mcApplied.phone,
+                verified: mcApplied.verified,
                 s1: mcApplied.s1,
                 from: mcApplied.from,
                 to: mcApplied.to,
@@ -4393,6 +4542,12 @@ export default function App(){
               </select>
               <input placeholder='Member ID' value={mcFilterMemberId} onChange={e=>setMcFilterMemberId(e.target.value)} />
               <input placeholder='Member name' value={mcFilterMemberName} onChange={e=>setMcFilterMemberName(e.target.value)} />
+              <input placeholder='Phone' value={mcFilterPhone} onChange={e=>setMcFilterPhone(e.target.value)} />
+              <select value={mcFilterVerified} onChange={e=>setMcFilterVerified(e.target.value)}>
+                <option value=''>All</option>
+                <option value='true'>Verified</option>
+                <option value='false'>Unverified</option>
+              </select>
               <input placeholder='S1 contains' value={mcFilterS1} onChange={e=>setMcFilterS1(e.target.value)} />
               <button onClick={()=> verifyNames()}>Verify Names</button>
               <label>From</label>
@@ -4410,6 +4565,8 @@ export default function App(){
                   code: mcFilterCode,
                   memberId: mcFilterMemberId,
                   memberName: mcFilterMemberName,
+                  phone: mcFilterPhone,
+                  verified: mcFilterVerified,
                   s1: mcFilterS1,
                   amountMin: mcFilterAmountMin,
                   amountMax: mcFilterAmountMax,
@@ -4424,6 +4581,8 @@ export default function App(){
                   collectionCode: next.code,
                   memberId: next.memberId,
                   memberName: next.memberName,
+                  phone: next.phone,
+                  verified: next.verified,
                   s1: next.s1,
                   from: next.from,
                   to: next.to,
@@ -4436,12 +4595,14 @@ export default function App(){
                 setMcFilterCode('')
                 setMcFilterMemberId('')
                 setMcFilterMemberName('')
+                setMcFilterPhone('')
+                setMcFilterVerified('')
                 setMcFilterS1('')
                 setMcFilterAmountMin('')
                 setMcFilterAmountMax('')
                 setMcFrom('')
                 setMcTo('')
-                setMcApplied({ searchField: 'all', text: '', code: '', memberId: '', memberName: '', s1: '', amountMin: '', amountMax: '', from: '', to: '' })
+                setMcApplied({ searchField: 'all', text: '', code: '', memberId: '', memberName: '', phone: '', verified: '', s1: '', amountMin: '', amountMax: '', from: '', to: '' })
                 setMcPage(1)
                 fetchMembersCollections({ limit: getDefaultMcFetchLimit(1, mcPageSize) })
               }}>Clear</button>
@@ -4459,6 +4620,107 @@ export default function App(){
               <button onClick={exportMembersCollectionsExcel}>Export Excel</button>
               <button onClick={exportMembersCollectionsPdf}>Export PDF</button>
             </div>
+
+            {(() => {
+              const rows = getFilteredMembersCollectionsRows()
+              const verifiedCount = rows.filter(r => Number(r?.member_id || 0) > 0).length
+              const unverifiedCount = Math.max(0, rows.length - verifiedCount)
+              return (
+                <div style={{marginBottom:10,padding:'10px 12px',border:'1px solid #d1d5db',borderRadius:8,background:'#f8fafc',display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
+                  <strong style={{color:'#0f172a'}}>Verification Summary</strong>
+                  <span style={{fontSize:13,color:'#0f172a'}}>Total: {rows.length}</span>
+                  <span style={{fontSize:13,color:'#166534'}}>Verified: {verifiedCount}</span>
+                  <span style={{fontSize:13,color:'#92400e'}}>Unverified: {unverifiedCount}</span>
+                </div>
+              )
+            })()}
+
+            {showVerifyMapping && (
+              <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:10000}}>
+                <div style={{background:'#fff', borderRadius:10, width:'96%', maxWidth:1300, maxHeight:'90vh', overflow:'auto', padding:16, boxShadow:'0 20px 60px rgba(0,0,0,0.28)'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                    <h4 style={{margin:0}}>Verify Names Mapping Workspace</h4>
+                    <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                      <button onClick={saveAllVerifyMappings} disabled={verifySavingAll || verifySavingRowId !== null}>
+                        {verifySavingAll ? 'Saving All...' : 'Save All Mappings'}
+                      </button>
+                      <button onClick={()=>setShowVerifyMapping(false)}>Close</button>
+                    </div>
+                  </div>
+                  <div style={{fontSize:12, color:'#334155', marginBottom:10}}>
+                    Left side shows collection entries. Right side shows best member matches using fuzzy name plus phone and historical mapping hints.
+                  </div>
+                  <div className='table-wrap' style={mainGridWrapStyle(500)}>
+                    <table style={mainGridTableStyle(true)}>
+                      <thead>
+                        <tr>
+                          <th>Collection Row</th>
+                          <th>Collection Name</th>
+                          <th>Collection Phone</th>
+                          <th>Suggested Members</th>
+                          <th>Selected Mapping</th>
+                          <th>Status</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(verifyMappingRows || []).length === 0 ? (
+                          <tr><td colSpan={7}>No rows available for mapping.</td></tr>
+                        ) : (verifyMappingRows || []).map(v=>{
+                          const selected = (v.suggestions || []).find(s=> Number(s._memberPrimaryId || s.id || 0) === Number(v.selectedMemberId || 0))
+                          return (
+                            <tr key={v.rowId}>
+                              <td>{v.rowId}</td>
+                              <td>{String(v?.row?.s4 || '')}</td>
+                              <td>{String(v?.row?.phone || '')}</td>
+                              <td>
+                                <select
+                                  value={String(v.selectedMemberId || '')}
+                                  onChange={e=>{
+                                    const selectedId = Number(e.target.value || 0) || null
+                                    const selectedMatch = (v.suggestions || []).find(s=> Number(s._memberPrimaryId || s.id || 0) === Number(selectedId || 0))
+                                    setVerifyMappingRows(prev => (prev || []).map(r => r.rowId === v.rowId
+                                      ? {
+                                          ...r,
+                                          selectedMemberId: selectedId,
+                                          selectedLabel: selectedMatch ? String(selectedMatch?.MEMBER_NAME || '') : '',
+                                        }
+                                      : r
+                                    ))
+                                  }}
+                                  style={{minWidth:330}}
+                                >
+                                  <option value=''>-- select member --</option>
+                                  {(v.suggestions || []).map(s=>{
+                                    const pid = Number(s._memberPrimaryId || s.id || 0)
+                                    if(!pid) return null
+                                    return (
+                                      <option key={`${v.rowId}-${pid}`} value={pid}>
+                                        {String(s?.MEMBER_NAME || '')} {s?.PHONE ? `| ${s.PHONE}` : ''} {s?._score != null ? `| score:${s._score}` : ''}
+                                      </option>
+                                    )
+                                  })}
+                                </select>
+                              </td>
+                              <td>{selected ? `${selected.MEMBER_NAME || ''}${selected.PHONE ? ` | ${selected.PHONE}` : ''}` : '-'}</td>
+                              <td>{v.verified ? 'Verified' : 'Unverified'}</td>
+                              <td>
+                                <button
+                                  onClick={()=>saveVerifyMappingForRow(v)}
+                                  disabled={!v.selectedMemberId || verifySavingRowId === v.rowId}
+                                >
+                                  {verifySavingRowId === v.rowId ? 'Saving...' : 'Save Mapping'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {(hasRoleRight('can_delete_members_collections', false) || hasRoleRight('can_unlock_members_collections', false)) && (
               <div className='card' style={{marginBottom:12}}>
@@ -5396,7 +5658,7 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   const [promptState, setPromptState] = useState({ open: false, level: 'info', message: '' })
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [showQuickForm, setShowQuickForm] = useState(false)
-  const [quickRows, setQuickRows] = useState([{ id: 1, name: '', collection_date: '', total_amount: '', detail_entries: [], selected_detail: '', selected_detail_amount: '' }])
+  const [quickRows, setQuickRows] = useState([{ id: 1, selected_member_id: '', name: '', phone: '', collection_date: '', total_amount: '', detail_entries: [], selected_detail: '', selected_detail_amount: '' }])
   const [quickSubmitting, setQuickSubmitting] = useState(false)
 
   // total steps (1=file/date/church, 2=mapping, 3=preview/edit, 4=fix, 5=done)
@@ -5539,7 +5801,9 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
   function makeQuickRow(){
     return {
       id: Date.now() + Math.floor(Math.random() * 1000),
+      selected_member_id: '',
       name: '',
+      phone: '',
       collection_date: selectedDate || '',
       total_amount: '',
       detail_entries: [],
@@ -5630,7 +5894,15 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
     const rowsForBulk = []
     quickRows.forEach((r, idx)=>{
       const rowNo = idx + 1
-      const name = String(r.name || '').trim()
+      const selectedMemberIdRaw = String(r.selected_member_id || '').trim()
+      const selectedMemberId = selectedMemberIdRaw ? Number(selectedMemberIdRaw) : null
+      const selectedMember = selectedMemberId ? (membersLocal || []).find(m=> {
+        const canonical = Number(m?.MEMBER_ID ?? m?.member_id ?? m?.id ?? 0)
+        return canonical === selectedMemberId
+      }) : null
+      const canonicalMemberId = selectedMember ? Number(selectedMember?.MEMBER_ID ?? selectedMember?.member_id ?? selectedMember?.id ?? 0) : null
+      const name = String(r.name || selectedMember?.MEMBER_NAME || '').trim()
+      const phone = String(r.phone || selectedMember?.PHONE || '').trim()
       const dateText = String(r.collection_date || '').trim()
       const totalAmount = Number(String(r.total_amount || '').trim())
       const detailEntries = Array.isArray(r.detail_entries) ? r.detail_entries : []
@@ -5654,6 +5926,8 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
             church: effectiveChurch,
             s2: parsed.toISOString(),
             s4: name,
+            phone: phone || null,
+            member_id: canonicalMemberId || null,
             source: uploaderName || String(user?.username || ''),
             notes: `${option.custom_collection_name || option.code || option.column_name} | Total: ${totalAmount}`,
             [detailCol]: detailAmount,
@@ -5869,6 +6143,30 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
                 </div>
                 <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(190px, 1fr))', gap:8, marginBottom:8}}>
                   <div>
+                    <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Member (optional)</label>
+                    <select
+                      value={row.selected_member_id || ''}
+                      onChange={e=>{
+                        const selected = String(e.target.value || '')
+                        const found = (membersLocal || []).find(m=> String(m?.MEMBER_ID ?? m?.member_id ?? m?.id ?? '') === selected)
+                        updateQuickRow(row.id, {
+                          selected_member_id: selected,
+                          name: found ? String(found?.MEMBER_NAME || '') : row.name,
+                          phone: found ? String(found?.PHONE || '') : row.phone,
+                        })
+                      }}
+                      disabled={quickSubmitting}
+                      style={{width:'100%'}}
+                    >
+                      <option value=''>-- select member --</option>
+                      {(membersLocal||[]).map(m=> (
+                        <option key={String(m?.id || m?.MEMBER_ID || m?.member_id || m?.MEMBER_NAME || '')} value={String(m?.MEMBER_ID ?? m?.member_id ?? m?.id ?? '')}>
+                          {String(m?.MEMBER_NAME || '')} {m?.PHONE ? `| ${m.PHONE}` : ''} {(m?.MEMBER_ID ?? m?.member_id) ? `| ID:${m?.MEMBER_ID ?? m?.member_id}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
                     <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Name</label>
                     <input
                       type='text'
@@ -5884,6 +6182,17 @@ function CollectionsUpload({token, authFetch, collectionCodes, churches, fetchCo
                         <option key={m.id} value={String(m.MEMBER_NAME||'')} />
                       ))}
                     </datalist>
+                  </div>
+                  <div>
+                    <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Phone number (optional)</label>
+                    <input
+                      type='text'
+                      placeholder='Phone number'
+                      value={row.phone || ''}
+                      onChange={e=>updateQuickRow(row.id, {phone: e.target.value})}
+                      disabled={quickSubmitting}
+                      style={{width:'100%'}}
+                    />
                   </div>
                   <div>
                     <label style={{display:'block', fontSize:12, color:'#334155', marginBottom:4}}>Date of collection</label>

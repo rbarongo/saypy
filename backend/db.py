@@ -30,6 +30,18 @@ load_dotenv()
 DB_ENGINE = os.getenv("DB_ENGINE", "postgres").lower()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    val = str(raw).strip().lower()
+    if val in {"1", "true", "yes", "y", "on"}:
+        return True
+    if val in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == "":
@@ -579,6 +591,7 @@ members_collection = Table(
     Column('s2', DateTime, nullable=True),
     Column('s3', Integer, nullable=True),
     Column('s4', String(255), nullable=True),
+    Column('phone', String(100), nullable=True),
     Column('s5', Numeric, nullable=True),
     Column('s6', Numeric, nullable=True),
     Column('s7', Numeric, nullable=True),
@@ -830,10 +843,17 @@ def create_tables():
         ensure_global_config_schema()
     except Exception:
         pass
-    try:
-        import_collection_codes_from_workbook()
-    except Exception:
-        pass
+    # Importing workbook codes for every church can be expensive on larger Postgres datasets,
+    # so keep it opt-in there while preserving legacy behavior for sqlite.
+    should_import_codes = _env_bool(
+        'IMPORT_COLLECTION_CODES_ON_STARTUP',
+        DB_ENGINE in ('sqlite', 'sqlite3')
+    )
+    if should_import_codes:
+        try:
+            import_collection_codes_from_workbook()
+        except Exception:
+            pass
 
 
 def _xlsx_read_collection_codes_rows(xlsx_path: str) -> List[dict]:
@@ -1766,6 +1786,7 @@ def ensure_members_collection_schema() -> List[str]:
     expected['s2'] = 'DATETIME'
     expected['s3'] = 'INTEGER'
     expected['s4'] = 'TEXT'
+    expected['phone'] = 'TEXT'
     expected['s5'] = 'NUMERIC'
     expected['s6'] = 'NUMERIC'
     expected['s7'] = 'NUMERIC'
