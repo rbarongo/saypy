@@ -1,0 +1,77 @@
+/* AdminKit's bundled app.css (public/adminkit/app.css) has no real dark-mode
+   support — it ships Bootstrap 5.3's `--bs-*` custom-property scaffolding but
+   never repopulates those variables under `[data-bs-theme="dark"]`, and a few
+   components (`.form-control`, `.form-select`, `.navbar-bg`) hardcode a
+   literal `#fff`/`#495057` instead of even using a variable. This file is
+   that missing dark layer, reusing this app's own already-tuned dark palette
+   (`--surface`/`--text`/`--border`, defined in styles.css) rather than
+   inventing a second one. Toggled by ThemeToggle.jsx alongside `data-theme`. */
+
+:root[data-bs-theme="dark"]{
+  --bs-body-bg: var(--bg);
+  --bs-body-color: var(--text);
+  --bs-emphasis-color: var(--text);
+  --bs-secondary-color: var(--text-muted);
+  --bs-tertiary-color: var(--text-faint);
+  --bs-tertiary-bg: var(--surface-2);
+  --bs-border-color: var(--border);
+  --bs-border-color-translucent: var(--border);
+  --bs-heading-color: var(--text);
+  --bs-link-color: var(--accent);
+  --bs-link-hover-color: var(--accent-hover);
+}
+
+:root[data-bs-theme="dark"] .card{
+  --bs-card-bg: var(--surface);
+  --bs-card-cap-bg: var(--surface);
+  --bs-card-border-color: var(--border);
+  --bs-card-title-color: var(--text-muted);
+}
+
+:root[data-bs-theme="dark"] .table{
+  --bs-table-bg: var(--surface);
+  --bs-table-color: var(--text);
+  --bs-table-border-color: var(--border);
+  --bs-table-striped-bg: var(--surface-2);
+  --bs-table-hover-bg: var(--surface-2);
+}
+
+:root[data-bs-theme="dark"] .dropdown-menu{
+  --bs-dropdown-bg: var(--surface);
+  --bs-dropdown-color: var(--text);
+  --bs-dropdown-link-color: var(--text);
+  --bs-dropdown-link-hover-color: var(--text);
+  --bs-dropdown-link-hover-bg: var(--surface-2);
+  --bs-dropdown-border-color: var(--border);
+  --bs-dropdown-header-color: var(--text-faint);
+}
+
+:root[data-bs-theme="dark"] .modal-content{
+  --bs-modal-bg: var(--surface);
+  --bs-modal-color: var(--text);
+  --bs-modal-border-color: var(--border);
+  --bs-modal-header-border-color: var(--border);
+}
+
+:root[data-bs-theme="dark"] .form-control,
+:root[data-bs-theme="dark"] .form-select{
+  background-color: var(--surface);
+  color: var(--text);
+}
+/* Not styling .form-control::placeholder here: every text field in this app
+   is a FloatingField (see FloatingField.jsx), and Bootstrap's floating-label
+   CSS deliberately keeps the native placeholder transparent so only the
+   floating <label> shows — giving the placeholder a visible color here would
+   fight that and double-render as ghosted text behind the label. */
+:root[data-bs-theme="dark"] .form-floating > label{ color: var(--text-muted); }
+:root[data-bs-theme="dark"] .form-check-input{
+  background-color: var(--surface);
+  border-color: var(--border-strong);
+}
+
+/* .main's content-area background is a hardcoded #f5f7fb in app.css (not a
+   CSS var at all), same story as .navbar-bg below. */
+:root[data-bs-theme="dark"] .main{ background: var(--bg) !important; }
+:root[data-bs-theme="dark"] .navbar-bg{ background: var(--surface) !important; }
+:root[data-bs-theme="dark"] .navbar .text-dark{ color: var(--text) !important; }
+:root[data-bs-theme="dark"] .footer{ background: var(--bg); border-color: var(--border); }

@@ -1,0 +1,19 @@
+fastapi>=0.141
+uvicorn[standard]>=0.52
+pydantic>=2.13
+pydantic-settings>=2.15
+python-dotenv>=1.2
+sqlalchemy>=2.0
+psycopg[binary]>=3.2
+alembic>=1.13
+passlib[bcrypt]>=1.7
+bcrypt<4.0
+python-jose[cryptography]>=3.3
+python-multipart>=0.0.32
+email-validator>=2.0
+pandas>=2.2
+openpyxl>=3.1
+# Fernet symmetric encryption for "enc:"-prefixed .env secrets (app/env_crypto.py)
+# — already pulled in transitively by python-jose[cryptography] above, but listed
+# explicitly since this module depends on it directly.
+cryptography>=42

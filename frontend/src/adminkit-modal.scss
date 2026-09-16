@@ -1,0 +1,13 @@
+// AdminKit's own app.css (public/adminkit/app.css) doesn't import Bootstrap's
+// modal component at all — none of its static template pages use a modal, so
+// it was never bundled. This app relies on real Bootstrap modals (Modal.jsx)
+// throughout the Setup module, so pull in just that piece, scoped the same
+// way bootstrap-forms.scss was: only what's missing, nothing that would
+// collide with .btn/.card/etc.
+@import "bootstrap/scss/functions";
+@import "bootstrap/scss/variables";
+@import "bootstrap/scss/variables-dark";
+@import "bootstrap/scss/maps";
+@import "bootstrap/scss/mixins";
+@import "bootstrap/scss/utilities";
+@import "bootstrap/scss/modal";

@@ -1,0 +1,163 @@
+# Saypy Collection — Setup and Execution Guide
+
+This document explains how to configure, migrate, run, and maintain the **current** backend and frontend of the Saypy Collection application.
+
+---
+
+## 1. Project Overview
+
+The project is split into:
+1. **Backend (`api/`)** — the active backend. A FastAPI + SQLAlchemy 2.0 application backed by PostgreSQL, with schema managed entirely through Alembic migrations (no auto-`create_all`). It implements JWT auth, role-based access control (RBAC), churches, members, families, and the collections module (collection types, collections, collection groups, approvals, receipts).
+2. **Frontend (`frontend/`)** — a React + Vite application. The active UI lives under `src/components/members-core/` (routed through `CoreApp.jsx` and the left sidebar in `SidebarNav.jsx`) and talks to `api/` on port **8001**.
+
+> **Legacy note:** `backend_old/` (a separate FastAPI app, port 8000, its own `chrch_collections` Postgres database) and a few top-level frontend components (`CollectionsUpload.jsx`, `MembersCollectionsPage.jsx`, etc.) are the previous system. They still exist for reference but are **not required to run the app** — the sidebar marks anything still tied to them as disabled. Don't confuse `backend_old/.env` with `api/.env`; they're unrelated databases on the same local Postgres server. `reset_admin_password.py` and `migrate.py` at the repo root also target `backend_old`, not `api/` — see §6 for the equivalent for `api/`.
+
+---
+
+## 2. Environment Configuration
+
+### `api/.env`
+Copy from `api/.env.example` if it doesn't exist yet:
+```bash
+cd api
+cp .env.example .env
+```
+Key variables:
+- `DATABASE_URL` — Postgres connection string, e.g. `postgresql+psycopg://postgres:omi12345@localhost:5433/saypy_core`. Same local Postgres server as `backend_old`, but a **different database** (`saypy_core`, not `chrch_collections`) — no data is shared.
+- `JWT_SECRET_KEY` / `JWT_ALGORITHM` / `JWT_EXPIRE_MINUTES` — this API's own auth, independent of `backend_old`'s token system.
+- `CORS_ORIGINS` — comma-separated origins, or `*` (default; safe here since auth is a Bearer header, not cookies).
+- `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` — the bootstrap admin account created automatically on first startup if it doesn't exist.
+- `SEED_CHURCH_NAMES` — comma-separated church names seeded on first startup if the `churches` table is empty.
+
+### Frontend
+No `.env` is required for local dev — `frontend/src/components/members-core/api.js` defaults its API base to `http://<current-host>:8001`. Set `VITE_MEMBERS_API_BASE_URL` only if the backend is reachable somewhere other than port 8001 on the same host.
+
+---
+
+## 3. Database Setup & Migrations
+
+`api/`'s schema is managed **entirely through Alembic** — there is no automatic `create_all()` anywhere, so a fresh database must be migrated before the app can serve requests.
+
+### A. Create the database (once)
+```bash
+PGPASSWORD=omi12345 psql -h localhost -p 5433 -U postgres -c "CREATE DATABASE saypy_core;"
+```
+
+### B. Apply migrations
+```bash
+cd api
+.venv/bin/alembic upgrade head
+```
+
+### C. Seed data (automatic)
+On every app startup, `app/seed.py` runs and:
+1. Seeds churches from `SEED_CHURCH_NAMES` (only if the `churches` table is empty).
+2. Seeds household roles, membership categories, member statuses, contact types, nationalities (only if each table is empty).
+3. Seeds/tops-up the RBAC `permissions` table — this step is **additive**, so pulling in new permission codes (e.g. from a later collections-module change) always adds what's missing rather than only running against an empty table.
+4. Ensures a `system_admin` role exists and is granted every permission.
+5. Creates the bootstrap admin user (`SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`) with the `system_admin` role if it doesn't already exist.
+
+No manual seeding step is needed — just start the app (§4) after migrating.
+
+### D. Making a schema change
+Whenever you add/modify a model in `app/models.py`:
+```bash
+cd api
+.venv/bin/alembic revision --autogenerate -m "describe the change"
+.venv/bin/alembic upgrade head
+```
+Always review the generated migration file before applying — autogenerate can miss things like renamed columns.
+
+---
+
+## 4. How to Run the Backend (`api/`)
+
+1. **Navigate to the backend directory**:
+   ```bash
+   cd /home/anonymous/Projects/Django/saypy-collection/api
+   ```
+
+2. **Create the virtual environment** (first time only):
+   ```bash
+   python3 -m venv .venv
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   .venv/bin/pip install -r requirements.txt
+   ```
+
+4. **Apply migrations** (see §3B) if you haven't already.
+
+5. **Run the server**:
+   ```bash
+   .venv/bin/uvicorn app.main:app --reload --port 8001
+   ```
+
+6. **API documentation**, once running:
+   - Swagger UI: [http://127.0.0.1:8001/docs](http://127.0.0.1:8001/docs)
+   - ReDoc: [http://127.0.0.1:8001/redoc](http://127.0.0.1:8001/redoc)
+   - Health check: [http://127.0.0.1:8001/health](http://127.0.0.1:8001/health)
+
+---
+
+## 5. How to Run the Frontend (React + Vite)
+
+1. **Open a new terminal and navigate to the frontend directory**:
+   ```bash
+   cd /home/anonymous/Projects/Django/saypy-collection/frontend
+   ```
+
+2. **Install Node dependencies**:
+   ```bash
+   npm install
+   ```
+
+3. **Run the development server**:
+   ```bash
+   npm run dev
+   ```
+   Listens on [http://localhost:5175](http://localhost:5175) (bound to `0.0.0.0`, so it's also reachable from other devices on the LAN at that port).
+
+4. **Log in** with the seeded admin account: username `admin`, password from `SEED_ADMIN_PASSWORD` in `api/.env` (default `ChangeMe123!`) — change it after first login via User Management → Reset Password.
+
+---
+
+## 6. Emergency Admin Password Reset (`api/`)
+
+`reset_admin_password.py` at the repo root targets `backend_old`'s `saypy_admin` account and does **not** apply here — `api/` hashes passwords with bcrypt via `passlib` (see `app/security.py`) and has no dedicated CLI recovery script. If you're locked out of every account with `manage_users`, reset directly from a Python shell in `api/`:
+
+```bash
+cd api
+.venv/bin/python -c "
+from app.database import SessionLocal
+from app.models import User
+from app.security import hash_password
+
+db = SessionLocal()
+user = db.query(User).filter(User.username == 'admin').first()
+user.password_hash = hash_password('NewPassword123!')
+db.commit()
+print('Password updated for', user.username)
+"
+```
+Otherwise, any user with `manage_users` can reset another user's password from the app's User Management screen — no server restart needed either way.
+
+---
+
+## 7. Legacy: `backend_old/` and pre-`members-core` frontend
+
+Only relevant if you're working on features still tied to the old system (anything the sidebar shows greyed out):
+
+```bash
+cd backend_old
+source .venv/bin/activate   # or: python3 -m venv .venv && pip install -r requirements.txt
+uvicorn app:app --reload --port 8000
+```
+It uses its own `chrch_collections` Postgres database, its own `.env`, and its own auth/token system — entirely separate from `api/`. `migrate.py` (Access `.accdb` → SQL) and `init_members.py` (seed `members` from `Members.xlsx`) also belong to this legacy backend.
+
+---
+
+## 8. Development Patch Scripts (Root Directory)
+
+A few one-off scripts at the repo root (`add_official_member_dropdown.py`, `update_member_form.py`, `remove_misplaced_mappings.py`, `fix_ternary.py`) were automated patch utilities used during development to update `frontend/src/App.jsx` (the pre-`members-core` UI). They're not required to run the application and don't touch `api/` or the `members-core` frontend module.

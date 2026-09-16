@@ -8,4 +8,4 @@ npm install
 npm run dev
 ```
 
-This starts the Vite dev server (default port 5175). The demo app posts uploads to `http://localhost:8000/upload`.
+This starts the Vite dev server (default port 5175). The demo app posts uploads to `http://localhost:8001/upload`.

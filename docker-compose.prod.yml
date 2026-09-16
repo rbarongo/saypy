@@ -1,0 +1,67 @@
+services:
+  # No "db" service here — see the comment at the top of docker-compose.yml.
+  # In production, DATABASE_URL in .env.prod should normally point at a
+  # genuinely separate/managed Postgres server.
+
+  backend:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: saypy_prod_backend
+    restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --workers 4
+    # Published (not host networking, unlike dev) — the frontend's static JS
+    # runs in the *browser*, not in a container, and both App.jsx and api.js
+    # already fall back to "<the host/domain the browser used>:8001" when no
+    # VITE_API_BASE_URL/VITE_MEMBERS_API_BASE_URL is set, so publishing this
+    # port on the same host the frontend is served from is enough — no
+    # reverse-proxy path rewriting required.
+    ports:
+      - "8001:8001"
+    volumes:
+      # Decryption key for "enc:"-prefixed .env values (see
+      # api/app/env_crypto.py). Read-only, never baked into the image, never
+      # itself an env var in .env.prod.
+      - ./.secrets.key:/app/.secrets.key:ro
+      - ./api/uploads:/app/uploads
+    extra_hosts:
+      # Lets the container resolve "host.docker.internal" to the host
+      # machine on Linux too (Docker Desktop already provides this
+      # natively) — only relevant if your "remote" Postgres is actually
+      # running on this same host rather than a truly separate server. If
+      # so, set DATABASE_URL's host to "host.docker.internal" and make sure
+      # Postgres's listen_addresses/pg_hba.conf accept connections from the
+      # Docker bridge subnet (`docker network inspect bridge`) — by default
+      # Postgres only listens on 127.0.0.1, which containers can never reach.
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      SEED_CHURCH_NAMES: ${SEED_CHURCH_NAMES}
+      ENV_SECRETS_KEY_FILE: /app/.secrets.key
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: prod
+      args:
+        # Baked into the static build at image-build time (Vite inlines
+        # import.meta.env.* then, it isn't read at container runtime) — leave
+        # unset (the default) to use the automatic same-host:8001 fallback
+        # described above; only set these if the backend won't be reachable
+        # there (a different subdomain, a TLS-terminating proxy in front of
+        # just one of the two services, etc).
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
+        - VITE_MEMBERS_API_BASE_URL=${VITE_MEMBERS_API_BASE_URL:-}
+    container_name: saypy_prod_frontend
+    restart: always
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

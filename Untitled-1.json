@@ -1,0 +1,41 @@
+{
+    "valid": false,
+    "receipt_type": "tithe",
+    "items": [
+        {
+            "name": "Tithe",
+            "amount": 50,
+            "currency": "TZS",
+            "category": "tithe"
+        },
+        {
+            "name": "Offering",
+            "amount": 50,
+            "currency": "TZS",
+            "category": "offering"
+        }
+    ],
+    "total_amount": 500000,
+    "currency": "TZS",
+    "payer": "David Robert Mazula",
+    "name": "David Robert Mazula",
+    "phone": null,
+    "email": null,
+    "phone_or_email": null,
+    "payee": "KIBADA CENTRAL SDA CHURCH",
+    "reference_number": "19ffed77722b79d4",
+    "transaction_date": "14/08/2026, 08:56 Am",
+    "payment_channel": "BANK",
+    "description_matches_receipt": false,
+    "validation_issues": [
+        "Total amount in receipt (500,000 TZS) does not match the amounts in the description (100 TZS).",
+        "Receipt does not show the full amounts as described by the sender."
+    ],
+    "summary": "The payment receipt shows a contribution of 500,000 TZS to KIBADA CENTRAL SDA CHURCH, but the sender's description indicates a total of 100 TZS, which creates a mismatch.",
+    "reconciliation": false,
+    "receipt_number": "",
+    "submission_channel": "web",
+    "user_feedback": false,
+    "sender": null,
+    "account_type": "BANK"
+}

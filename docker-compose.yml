@@ -1,0 +1,69 @@
+services:
+  # No "db" service here — PostgreSQL isn't containerized. This project
+  # already runs against an existing local Postgres cluster (see api/.env),
+  # bound to 127.0.0.1 like most default installs — reached via
+  # DATABASE_URL below (see .env.dev/.env.prod). If your Postgres really is
+  # on a separate remote host instead, just point DATABASE_URL at it.
+
+  backend:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: saypy_dev_backend
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    # Host networking (Linux only): lets the container reach a Postgres bound
+    # only to 127.0.0.1 on this same machine (the common case for local dev)
+    # without Postgres needing to listen on any other interface. Bypasses
+    # "ports:" — the container shares the host's network stack directly, so
+    # it's already reachable at localhost:8001. If your Postgres is genuinely
+    # on a separate remote host, you can drop this and use
+    # "ports: - 8001:8001" + DATABASE_URL pointed at that host instead.
+    network_mode: host
+    volumes:
+      - ./api:/app
+      # Anonymous volume so the host's own local-dev virtualenv (./api/.venv,
+      # used when running uvicorn directly on the host, outside Docker)
+      # doesn't get bind-mounted over the container's own globally-installed
+      # packages via the ./api:/app mount above.
+      - /app/.venv
+      # Decryption key for "enc:"-prefixed .env values (see
+      # api/app/env_crypto.py). Read-only, never baked into the image, never
+      # itself an env var in .env.dev.
+      - ./.secrets.key:/app/.secrets.key:ro
+      # Uploaded payment-evidence files, persisted on the host across
+      # container recreation (see app/settings.py's upload_dir).
+      - ./api/uploads:/app/uploads
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      SEED_CHURCH_NAMES: ${SEED_CHURCH_NAMES}
+      ENV_SECRETS_KEY_FILE: /app/.secrets.key
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: saypy_dev_frontend
+    restart: unless-stopped
+    ports:
+      - "5175:5175"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      # Optional — left unset here on purpose. Both App.jsx and api.js fall
+      # back to "<same hostname the browser used>:8001" when these aren't
+      # set, which already resolves correctly since `backend` above runs on
+      # host networking at port 8001. Only set these if your backend is
+      # reachable somewhere other than the frontend's own host:8001.
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      VITE_MEMBERS_API_BASE_URL: ${VITE_MEMBERS_API_BASE_URL:-}
+    depends_on:
+      - backend

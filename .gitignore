@@ -1,0 +1,25 @@
+.venv
+./envs
+node_modules
+__pycache__
+*.pyc
+*.db
+dist
+.env
+.env.*
+!.env.example
+
+# Fernet key used to decrypt "enc:"-prefixed .env values (api/app/env_crypto.py,
+# manage_secrets.py) — never commit this, it's the master key for every
+# encrypted secret in .env.dev/.env.prod. Generate a fresh one per environment.
+.secrets.key
+config.py
+tssannual2023/config.py
+tssannual2024/config.py
+tssannual2023
+tssannual2024
+tssannual2025/scripts/.env
+.tssenv/
+tssannual2023/documents
+tssannual2024/documents
+tssannual2025/documents
