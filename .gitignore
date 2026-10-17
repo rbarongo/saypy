@@ -12,7 +12,7 @@ dist
 # Fernet key used to decrypt "enc:"-prefixed .env values (api/app/env_crypto.py,
 # manage_secrets.py) — never commit this, it's the master key for every
 # encrypted secret in .env.dev/.env.prod. Generate a fresh one per environment.
-.secrets.key
+# .secrets.key
 config.py
 tssannual2023/config.py
 tssannual2024/config.py
