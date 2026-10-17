@@ -5,9 +5,9 @@ __pycache__
 *.pyc
 *.db
 dist
-.env
-.env.*
-!.env.example
+# .env
+# .env.*
+# !.env.example
 
 # Fernet key used to decrypt "enc:"-prefixed .env values (api/app/env_crypto.py,
 # manage_secrets.py) — never commit this, it's the master key for every
