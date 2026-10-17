@@ -1,0 +1,696 @@
+# Saypy Collection — Deployment Guide
+
+How to deploy the **backend** (`api/`, FastAPI + PostgreSQL) and the **frontend**
+(`frontend/`, React + Vite) to a production server — first **without Docker**,
+then **with Docker**.
+
+> For running locally during development, see `how_to_run` (no Docker) and
+> `DOCKER.md` (Docker dev stack). This file is only about production deployment.
+
+---
+
+## 0. Architecture & things to know first
+
+```
+            Browser
+               │  https://collection.example.com
+               ▼
+        ┌──────────────┐
+        │    nginx     │  :80 / :443  (TLS, static files, reverse proxy)
+        └──────┬───────┘
+     /         │          /api/*
+ static SPA    │     ┌──────────────────────┐
+ (dist/)       └────►│ FastAPI (uvicorn)    │ 127.0.0.1:8001
+                     └──────────┬───────────┘
+                                ▼
+                     ┌──────────────────────┐
+                     │ PostgreSQL           │ (not containerized)
+                     └──────────────────────┘
+```
+
+Facts about this app that affect deployment:
+
+| Topic | Detail |
+|---|---|
+| Backend port | `8001` (uvicorn, `app.main:app`) |
+| Database | PostgreSQL. Schema comes **only** from Alembic (`alembic upgrade head`); there is no `create_all()` |
+| Seed data | Runs automatically on **every** app start (`app/seed.py`), and it is safe to re-run. It creates the admin user and churches from `SEED_*` |
+| Config | Backend reads `api/.env` (or real environment variables) |
+| Encrypted secrets | `DATABASE_URL`, `JWT_SECRET_KEY` and `SEED_ADMIN_PASSWORD` may be stored as `enc:...`. They are decrypted with the key in `.secrets.key` at the repo root (or `ENV_SECRETS_KEY` / `ENV_SECRETS_KEY_FILE`) |
+| Uploads | Evidence files are written to `api/uploads/`. **Back this directory up, and keep it across redeploys** |
+| Frontend API URL | Set at **build time** by `VITE_API_BASE_URL` and `VITE_MEMBERS_API_BASE_URL`. If they are unset, the browser calls `<same-host>:8001` |
+| Frontend routing | Client-side routes (`/dashboard`, `/self-register`, …), so the web server must fall back to `index.html` |
+| Node version | Vite 7 needs **Node 20.19+ or 22.12+** |
+| Python version | 3.12 (matches the Docker image) |
+
+### Recommended production layout: one domain, `/api` proxied
+
+Serve the frontend at `https://your-domain/` and proxy `https://your-domain/api/`
+to the backend. Then build the frontend with:
+
+```
+VITE_API_BASE_URL=https://your-domain/api
+VITE_MEMBERS_API_BASE_URL=https://your-domain/api
+```
+
+Why: with HTTPS, the automatic `<host>:8001` fallback would call
+`https://your-domain:8001`. That only works if port 8001 also serves TLS;
+otherwise the browser blocks it as mixed content or a connection error. With
+the proxy you need only one certificate and one open port (443), and port 8001
+stays private.
+
+Throughout this guide, replace:
+
+- `collection.example.com` → your real domain (or the server IP if you have no domain)
+- `saypy` / `STRONG_DB_PASSWORD` → your DB user and password
+- `/opt/saypy-collection` → wherever you put the code
+
+The commands assume **Ubuntu 22.04/24.04** (Debian works the same way) and a
+user with `sudo`.
+
+---
+
+## 1. Common preparation (both methods)
+
+### 1.1 Point DNS at the server
+Create an `A` record `collection.example.com → <server public IP>`. You need it
+before requesting HTTPS certificates.
+
+### 1.2 Get the code onto the server
+```bash
+sudo mkdir -p /opt/saypy-collection
+sudo chown $USER:$USER /opt/saypy-collection
+git clone <your-repo-url> /opt/saypy-collection
+cd /opt/saypy-collection
+git checkout main          # or the branch/tag you want to deploy
+```
+
+> `.env`, `.env.dev`, `.env.prod`, `api/.env` and `.secrets.key` are **not** in
+> git. You create them on the server in the steps below. Never copy the dev
+> `.secrets.key` to production.
+
+### 1.3 PostgreSQL: create the database and user
+
+If Postgres is not installed yet (and you aren't using a managed DB such as RDS
+or DigitalOcean):
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable --now postgresql
+```
+
+Create a dedicated user and database:
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE USER saypy WITH PASSWORD 'STRONG_DB_PASSWORD';
+CREATE DATABASE saypy_core OWNER saypy;
+GRANT ALL PRIVILEGES ON DATABASE saypy_core TO saypy;
+SQL
+```
+
+The resulting connection string (note the `+psycopg` driver):
+```
+postgresql+psycopg://saypy:STRONG_DB_PASSWORD@localhost:5432/saypy_core
+```
+
+> **Moving existing data from dev?** Dump from the dev cluster and restore into prod:
+> ```bash
+> # on the dev machine (dev Postgres runs on port 5433)
+> pg_dump -h localhost -p 5433 -U postgres -Fc saypy_core > saypy_core.dump
+> # copy to the server, then:
+> pg_restore -h localhost -U saypy -d saypy_core --no-owner saypy_core.dump
+> ```
+> Also copy `api/uploads/` across so existing evidence files still resolve.
+
+### 1.4 Generate production secrets
+
+```bash
+# A random JWT signing key
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+Optional: **encrypt** the secrets so they aren't stored in plain text in env files:
+```bash
+cd /opt/saypy-collection/api
+python3 -m venv /tmp/saypy-secrets && /tmp/saypy-secrets/bin/pip install -q cryptography
+# 1. New key for THIS environment (saved at the repo root)
+/tmp/saypy-secrets/bin/python manage_secrets.py genkey > ../.secrets.key
+chmod 600 ../.secrets.key
+# 2. Encrypt each secret and paste the enc:... output into the env file
+/tmp/saypy-secrets/bin/python manage_secrets.py encrypt "postgresql+psycopg://saypy:STRONG_DB_PASSWORD@localhost:5432/saypy_core"
+/tmp/saypy-secrets/bin/python manage_secrets.py encrypt "<your JWT secret>"
+/tmp/saypy-secrets/bin/python manage_secrets.py encrypt "<initial admin password>"
+```
+(For Method A you can run these commands with the app's own venv from step A.3
+instead.) Keep a copy of `.secrets.key` somewhere safe, such as a password
+manager. If you lose it, the `enc:` values can't be decrypted.
+
+---
+
+# METHOD A — Deploy WITHOUT Docker
+
+Stack: **systemd** runs uvicorn on `127.0.0.1:8001`; **nginx** serves the built
+frontend and proxies `/api/` to the backend; **certbot** provides HTTPS.
+
+## A.1 Install system packages
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git nginx curl build-essential libpq-dev
+
+# Node.js 22 LTS (the Ubuntu default Node is too old for Vite 7)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v      # must be >= 20.19
+python3 --version   # 3.12 recommended (3.11+ works)
+```
+
+## A.2 Create a service user
+
+```bash
+sudo useradd --system --create-home --home-dir /home/saypy --shell /usr/sbin/nologin saypy
+sudo chown -R saypy:saypy /opt/saypy-collection
+```
+(Run later build/maintenance commands as this user with `sudo -u saypy ...`, or
+temporarily give ownership back to yourself while building.)
+
+## A.3 Backend: install
+
+```bash
+cd /opt/saypy-collection/api
+sudo -u saypy python3 -m venv .venv
+sudo -u saypy .venv/bin/pip install --upgrade pip
+sudo -u saypy .venv/bin/pip install -r requirements.txt
+sudo -u saypy mkdir -p uploads
+```
+
+## A.4 Backend: configure `api/.env`
+
+```bash
+sudo -u saypy cp .env.example .env
+sudo -u saypy nano .env
+```
+
+Production values:
+```ini
+DATABASE_URL=postgresql+psycopg://saypy:STRONG_DB_PASSWORD@localhost:5432/saypy_core
+# or: DATABASE_URL=enc:gAAAAAB...
+
+JWT_SECRET_KEY=<long random value from step 1.4>
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=480
+
+# Lock CORS to your real frontend origin (comma-separate several)
+CORS_ORIGINS=https://collection.example.com
+
+SEED_ADMIN_USERNAME=admin
+SEED_ADMIN_PASSWORD=<strong initial password>
+SEED_CHURCH_NAMES=Kibada,KCC,Mwera,Goroka
+```
+
+```bash
+sudo chmod 600 /opt/saypy-collection/api/.env
+```
+
+If you used `enc:` values, the key at `/opt/saypy-collection/.secrets.key` is
+found automatically. If you keep it somewhere else, set
+`ENV_SECRETS_KEY_FILE=/path/to/key` in the systemd unit below.
+
+## A.5 Backend: run migrations
+
+```bash
+cd /opt/saypy-collection/api
+sudo -u saypy .venv/bin/alembic upgrade head
+```
+
+Quick smoke test (Ctrl+C to stop):
+```bash
+sudo -u saypy .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
+# in another terminal:
+curl http://127.0.0.1:8001/health
+```
+
+## A.6 Backend: systemd service
+
+Create `/etc/systemd/system/saypy-api.service`:
+```ini
+[Unit]
+Description=Saypy Collection API (FastAPI/uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=saypy
+Group=saypy
+WorkingDirectory=/opt/saypy-collection/api
+# Uncomment if .secrets.key isn't at the repo root:
+# Environment=ENV_SECRETS_KEY_FILE=/etc/saypy/.secrets.key
+ExecStartPre=/opt/saypy-collection/api/.venv/bin/alembic upgrade head
+ExecStart=/opt/saypy-collection/api/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8001 --workers 4 \
+    --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now saypy-api
+sudo systemctl status saypy-api
+journalctl -u saypy-api -f        # live logs
+```
+
+`ExecStartPre` applies any new migrations on every restart, the same way the
+Docker entrypoint does.
+
+## A.7 Frontend: build
+
+```bash
+cd /opt/saypy-collection/frontend
+sudo -u saypy npm ci
+
+# Bake the public API URL into the bundle (see section 0)
+sudo -u saypy env \
+  VITE_API_BASE_URL=https://collection.example.com/api \
+  VITE_MEMBERS_API_BASE_URL=https://collection.example.com/api \
+  npm run build
+```
+
+You can put these two variables in `frontend/.env.production` instead; Vite
+picks that file up automatically during `npm run build`.
+
+Publish the build:
+```bash
+sudo mkdir -p /var/www/saypy
+sudo rsync -a --delete /opt/saypy-collection/frontend/dist/ /var/www/saypy/
+sudo chown -R www-data:www-data /var/www/saypy
+```
+
+## A.8 nginx
+
+Create `/etc/nginx/sites-available/saypy`:
+```nginx
+server {
+    listen 80;
+    server_name collection.example.com;
+
+    # Collection imports (Excel) and evidence uploads
+    client_max_body_size 25M;
+
+    root /var/www/saypy;
+    index index.html;
+
+    # API — strip the /api prefix (the FastAPI routes are mounted at /)
+    location /api/ {
+        proxy_pass http://127.0.0.1:8001/;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;   # long reports/imports
+    }
+
+    # Fingerprinted assets: cache aggressively
+    location /assets/ {
+        expires 30d;
+        access_log off;
+        try_files $uri =404;
+    }
+
+    # SPA fallback for client-side routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+The trailing `/` in `proxy_pass http://127.0.0.1:8001/;` matters: it makes
+`/api/auth/login` reach the backend as `/auth/login`.
+
+```bash
+sudo ln -s /etc/nginx/sites-available/saypy /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+## A.9 HTTPS (Let's Encrypt)
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d collection.example.com --redirect
+sudo certbot renew --dry-run     # check that auto-renewal works
+```
+
+## A.10 Firewall
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'     # 80 + 443
+sudo ufw enable
+```
+Do **not** open 8001 or 5432. The backend and Postgres are only reached
+locally.
+
+## A.11 Verify
+
+1. `curl https://collection.example.com/api/health` returns OK.
+2. Open `https://collection.example.com` and log in as `admin` with
+   `SEED_ADMIN_PASSWORD`.
+3. **Change the admin password immediately** (User Management → Reset Password).
+4. Hard-refresh a deep link such as `/dashboard`. It should load, not show a 404.
+5. Upload an evidence file and confirm it appears under `api/uploads/`.
+
+## A.12 Updating (redeploy)
+
+```bash
+cd /opt/saypy-collection
+sudo -u saypy git pull
+
+# Backend
+sudo -u saypy api/.venv/bin/pip install -r api/requirements.txt
+sudo systemctl restart saypy-api          # runs alembic upgrade head first
+
+# Frontend
+cd frontend
+sudo -u saypy npm ci
+sudo -u saypy npm run build               # uses frontend/.env.production if you created it
+sudo rsync -a --delete dist/ /var/www/saypy/
+```
+
+## A.13 Alternative: no domain, no proxy (LAN / quick setup)
+
+If you deploy on a LAN by IP without HTTPS, you can skip `/api` proxying and use
+the built-in fallback:
+
+- Run uvicorn with `--host 0.0.0.0 --port 8001` and open port 8001 in the firewall.
+- Build the frontend with **no** `VITE_*` variables.
+- Serve `dist/` with nginx on port 80 (same config as above without the
+  `location /api/` block).
+
+The browser then calls `http://<server-ip>:8001` automatically. Don't use
+this setup over the public internet.
+
+---
+
+# METHOD B — Deploy WITH Docker
+
+The repo ships `docker-compose.prod.yml`:
+
+- **backend**: the `api/Dockerfile` image, 4 uvicorn workers, published on
+  `8001`. Its entrypoint waits for the DB, then runs `alembic upgrade head`,
+  then starts uvicorn.
+- **frontend**: a multi-stage build (Node builds `dist/`, then nginx serves it),
+  published on `8080`.
+- **No Postgres container.** The stack connects to an external Postgres through
+  `DATABASE_URL`.
+- `./.secrets.key` and `./api/uploads` are bind-mounted, so the key never goes
+  into an image and uploads survive rebuilds.
+
+## B.1 Install Docker Engine + Compose plugin
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+sudo usermod -aG docker $USER   # log out and back in afterwards
+docker compose version
+```
+
+## B.2 Get the code and create `.env.prod`
+
+Follow sections 1.2 to 1.4 first (code, database, secrets). Then:
+
+```bash
+cd /opt/saypy-collection
+cp .env.example .env.prod
+nano .env.prod
+chmod 600 .env.prod
+```
+
+```ini
+# Postgres on the SAME host as Docker → use host.docker.internal (see B.3)
+# Managed/remote Postgres → use its real hostname
+DATABASE_URL=postgresql+psycopg://saypy:STRONG_DB_PASSWORD@host.docker.internal:5432/saypy_core
+# or enc:...
+
+JWT_SECRET_KEY=<long random value>
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=480
+
+CORS_ORIGINS=https://collection.example.com
+
+SEED_ADMIN_USERNAME=admin
+SEED_ADMIN_PASSWORD=<strong initial password>
+SEED_CHURCH_NAMES=Kibada,KCC,Mwera,Goroka
+
+# Build-time values for the frontend image (see section 0)
+VITE_API_BASE_URL=https://collection.example.com/api
+VITE_MEMBERS_API_BASE_URL=https://collection.example.com/api
+```
+
+**`.secrets.key` must exist at the repo root**, even if you don't use `enc:`
+values, because compose bind-mounts it and the mount fails if the file is
+missing. Either generate one (section 1.4) or `touch .secrets.key`.
+
+```bash
+mkdir -p api/uploads
+```
+
+## B.3 Let the containers reach Postgres
+
+**Managed or remote Postgres:** make sure its firewall allows the server's IP,
+and you're done.
+
+**Postgres on the same host:** containers can't reach `127.0.0.1` on the host.
+The compose file maps `host.docker.internal` to the host, but Postgres must
+also listen on the Docker bridge and accept connections from it:
+
+```bash
+# Find your Postgres version directory
+ls /etc/postgresql/
+sudo nano /etc/postgresql/<ver>/main/postgresql.conf
+#   listen_addresses = 'localhost,172.17.0.1'
+#   (or '*' — fine as long as the firewall blocks 5432 from outside)
+
+sudo nano /etc/postgresql/<ver>/main/pg_hba.conf
+#   add:
+#   host  saypy_core  saypy  172.16.0.0/12  scram-sha-256
+
+sudo systemctl restart postgresql
+```
+`172.16.0.0/12` covers Docker's default bridge networks. Check yours with
+`docker network inspect saypy-collection_default` once the stack has been
+created. Keep `5432` closed in ufw.
+
+## B.4 Keep container ports private (important)
+
+Docker publishes ports **around ufw**: `"8001:8001"` and `"8080:80"` become
+reachable from the internet even if ufw blocks them. Since a host nginx will
+sit in front (B.6), bind both ports to localhost by editing
+`docker-compose.prod.yml`:
+
+```yaml
+  backend:
+    ports:
+      - "127.0.0.1:8001:8001"
+  ...
+  frontend:
+    ports:
+      - "127.0.0.1:8080:80"
+```
+
+## B.5 Build and start
+
+```bash
+cd /opt/saypy-collection
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+
+Check:
+```bash
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f backend    # look for "Running database migrations..." then uvicorn startup
+curl http://127.0.0.1:8001/health
+curl -I http://127.0.0.1:8080
+```
+
+Both services use `restart: always`, so they come back after a reboot as long
+as Docker itself is enabled (`sudo systemctl enable docker`, which is the
+default).
+
+## B.6 Host nginx + HTTPS in front of the containers
+
+```bash
+sudo apt install -y nginx certbot python3-certbot-nginx
+```
+
+`/etc/nginx/sites-available/saypy`:
+```nginx
+server {
+    listen 80;
+    server_name collection.example.com;
+    client_max_body_size 25M;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8001/;     # trailing slash strips /api
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;      # frontend container (nginx + SPA)
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/saypy /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d collection.example.com --redirect
+
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+```
+
+Then run the checks in **A.11** (health, login, change the admin password, deep
+link, upload).
+
+> **No domain / LAN only?** Skip B.4 and B.6, leave `VITE_*` empty, and open
+> ports 8080 and 8001. Users browse to `http://<server-ip>:8080`, and the
+> frontend calls `http://<server-ip>:8001` automatically.
+
+## B.7 Day-to-day operations
+
+```bash
+cd /opt/saypy-collection
+DC="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+
+# Update / redeploy (migrations run automatically on backend start)
+git pull
+$DC up -d --build
+
+# Logs
+$DC logs -f backend
+$DC logs -f frontend
+
+# Shell / one-off commands in the backend
+$DC exec backend alembic current
+$DC exec backend alembic upgrade head
+$DC exec backend python manage_secrets.py encrypt "..."
+
+# Restart / stop
+$DC restart backend
+$DC down
+
+# Reclaim disk from old images after several deploys
+docker image prune -f
+```
+
+> Changed `VITE_API_BASE_URL` or `VITE_MEMBERS_API_BASE_URL`? Those are baked
+> into the frontend image, so rebuild it:
+> `$DC build --no-cache frontend && $DC up -d frontend`.
+
+**Rollback:** `git checkout <previous-tag-or-commit>` then `$DC up -d --build`.
+Be aware that Alembic migrations don't roll back on their own. If the new
+release added a migration, run `$DC exec backend alembic downgrade -1` (or
+restore a DB backup) **before** you check out the older code.
+
+---
+
+## C. Backups (both methods)
+
+Back up two things: **the database** and **`api/uploads/`**.
+
+```bash
+# /etc/cron.daily/saypy-backup   (chmod +x)
+#!/bin/sh
+set -e
+DEST=/var/backups/saypy
+mkdir -p "$DEST"
+STAMP=$(date +%F)
+PGPASSWORD='STRONG_DB_PASSWORD' pg_dump -h localhost -U saypy -Fc saypy_core > "$DEST/saypy_core_$STAMP.dump"
+tar -czf "$DEST/uploads_$STAMP.tar.gz" -C /opt/saypy-collection/api uploads
+find "$DEST" -type f -mtime +14 -delete     # keep 14 days
+```
+
+Restore:
+```bash
+pg_restore -h localhost -U saypy -d saypy_core --clean --no-owner saypy_core_YYYY-MM-DD.dump
+tar -xzf uploads_YYYY-MM-DD.tar.gz -C /opt/saypy-collection/api
+```
+
+Copy backups off the server too (rsync, S3, etc.). Also keep `.secrets.key` and
+the env files in a password manager.
+
+---
+
+## D. Emergency admin password reset
+
+```bash
+# Without Docker
+cd /opt/saypy-collection/api && sudo -u saypy .venv/bin/python - <<'PY'
+from app.database import SessionLocal
+from app.models import User
+from app.security import hash_password
+db = SessionLocal()
+u = db.query(User).filter(User.username == 'admin').first()
+u.password_hash = hash_password('NewPassword123!'); db.commit(); print('reset', u.username)
+PY
+
+# With Docker: run the same Python via
+docker compose -f docker-compose.prod.yml exec -T backend python - <<'PY'
+... same script ...
+PY
+```
+
+---
+
+## E. Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| Login page loads but every request fails (console: CORS / mixed content / `:8001` refused) | The frontend was built without the `VITE_*` values, or with the wrong ones. Set them to `https://your-domain/api` and **rebuild** the frontend |
+| `404` on `/api/...` reaching FastAPI as `/api/...` | `proxy_pass` is missing its trailing slash. Use `http://127.0.0.1:8001/;` |
+| `404` on refresh of `/dashboard` | The SPA fallback is missing. Use `try_files $uri $uri/ /index.html;` |
+| CORS error with correct URLs | `CORS_ORIGINS` doesn't include the exact origin (scheme + host, no trailing slash) |
+| `413 Request Entity Too Large` on import/upload | Raise `client_max_body_size` in nginx |
+| `Found an encrypted .env value (enc:...) but no decryption key` | `.secrets.key` is missing or empty, or `ENV_SECRETS_KEY_FILE` points to the wrong place |
+| `InvalidToken` when decrypting | The value was encrypted with a different key (for example the dev key). Re-encrypt with the production key |
+| Docker: `Waiting for the database...` then alembic `connection refused` | Postgres isn't reachable from the container. Check B.3 (`listen_addresses`, `pg_hba.conf`, `host.docker.internal`) |
+| `password authentication failed` | Wrong DB credentials in `DATABASE_URL`, or the `pg_hba.conf` method doesn't match |
+| `relation "..." does not exist` | Migrations didn't run. Run `alembic upgrade head` (A.5) or check the backend logs (B.5) |
+| Uploaded evidence missing after redeploy | `api/uploads` wasn't kept (non-Docker: don't delete the folder; Docker: keep the `./api/uploads` bind mount) |
+| `npm run build` fails with a Vite/Node error | Node is too old. Install Node 22 (A.1) |
+| `502 Bad Gateway` from nginx | The backend is down. Check `journalctl -u saypy-api -e` or `docker compose ... logs backend` |
+
+---
+
+## F. Pre-go-live checklist
+
+- [ ] Strong, unique `JWT_SECRET_KEY`, DB password and `SEED_ADMIN_PASSWORD` (not the dev ones)
+- [ ] New `.secrets.key` for production, stored safely, `chmod 600`
+- [ ] `CORS_ORIGINS` set to the real domain (not `*`)
+- [ ] Frontend built with `VITE_*` pointing at `https://your-domain/api`
+- [ ] HTTPS working, HTTP redirects to HTTPS, certbot renewal tested
+- [ ] Only ports 22/80/443 reachable from outside (8001, 8080 and 5432 are private)
+- [ ] Admin password changed after first login
+- [ ] Daily DB + `api/uploads` backups running and copied off-server, with a restore tested once
